@@ -1,18 +1,28 @@
 
+#include <linux/netlink.h>
+
 #include "condor_common.h"
+#include "condor_config.h"
 #include "condor_arglist.h"
 #include "my_popen.h"
 
 #include "network_namespaces.h"
 
 NetworkNamespaceManager::NetworkNamespaceManager(std::string uniq_namespace) :
-	network_namespace(uniq_namespace), state(UNCREATED)
-	{}
+	m_state(UNCREATED), m_network_namespace(uniq_namespace), m_sock(-1)
+	{
+	}
 
 int NetworkNamespaceManager::CreateNamespace() {
 	if (state != UNCREATED) {
 		dprintf(D_FULLDEBUG, "Internal bug: NetworkNamespaceManager::CreateNamespace has already been invoked.\n");
-		state = FAILED;
+		m_state = FAILED;
+		return 1;
+	}
+
+	if ((m_sock = create_socket()) < 0) {
+		dprintf(D_ALWAYS, "Unable to create a socket to talk to the kernel for network namespaces.\n");
+		m_state = FAILED;
 		return 1;
 	}
 
@@ -59,7 +69,9 @@ int NetworkNamespaceManager::CreateNamespace() {
 	return 0;
 }
 
-CreateNetworkPipe() {
-	lxc_veth_create("veth0", "veth1");
+int NetworkNamespaceManager::CreateNetworkPipe() {
+	if (netlink_socket == -1) {
+        }
+	return 1;
 }
 

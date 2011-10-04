@@ -12,6 +12,7 @@
 #include <linux/sched.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
+#include <linux/veth.h>
 
 extern int handle_match(const char *, long long);
 
@@ -48,7 +49,7 @@ int create_socket() {
 		return sock;
 }
 
-int send_to_kernel(int sock, struct iovec* iov, size_t ioveclen) {
+static int send_to_kernel(int sock, struct iovec* iov, size_t ioveclen) {
 
 	if (sock < 0) {
 		fprintf(stderr, "Invalid socket: %d.\n", sock);
@@ -74,7 +75,7 @@ int send_to_kernel(int sock, struct iovec* iov, size_t ioveclen) {
 	return 0;
 }
 
-int send_and_ack(int sock, struct iovec* iov, size_t ioveclen) {
+static int send_and_ack(int sock, struct iovec* iov, size_t ioveclen) {
 
 	int rc;
 	if ((rc = send_to_kernel(sock, iov, ioveclen))) {
@@ -92,13 +93,26 @@ int send_and_ack(int sock, struct iovec* iov, size_t ioveclen) {
 
 #define VETH "veth"
 #define VETH_LEN strlen(VETH)
-int create_veth(int sock) {
+int create_veth(int sock, const char * veth0, const char * veth1) {
 
-	struct iovec iov[5];
+	struct iovec iov[12];
+
+	size_t veth0_len = strlen(veth0);
+	size_t veth1_len = strlen(veth1);
+	if (veth0_len >= IFNAMSIZ) {
+		fprintf(stderr, "Name too long for network device: %s (size %d, max %d).\n", veth0, veth0_len, IFNAMSIZ);
+		return 1;
+	}
+	if (veth1_len >= IFNAMSIZ) {
+		fprintf(stderr, "Name too long for network device: %s\n", veth1, veth1_len, IFNAMSIZ);
+		return 1;
+	}
 
 	// Create the header of the netlink message
 	struct nlmsghdr nlmsghdr = {
-		.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)) + RTA_LENGTH(0) + RTA_LENGTH(VETH_LEN),
+		.nlmsg_len = NLMSG_LENGTH(sizeof(struct ifinfomsg)) + RTA_LENGTH(0) + RTA_LENGTH(VETH_LEN) + 
+			RTA_LENGTH(0) + RTA_LENGTH(0) + NLMSG_ALIGN(sizeof(struct ifinfomsg)) + 
+			RTA_LENGTH(0) + RTA_ALIGN(veth1_len) + RTA_LENGTH(0) + RTA_ALIGN(veth0_len),
 		.nlmsg_type = RTM_NEWLINK,
 		.nlmsg_flags = NLM_F_REQUEST|NLM_F_CREATE|NLM_F_EXCL|NLM_F_ACK,
 		.nlmsg_seq = ++seq,
@@ -116,7 +130,7 @@ int create_veth(int sock) {
 
 	struct rtattr rta;
 	rta.rta_type = IFLA_LINKINFO;
-	rta.rta_len = RTA_LENGTH(0) + RTA_LENGTH(VETH_LEN);
+	rta.rta_len = RTA_LENGTH(0) + RTA_LENGTH(VETH_LEN) + RTA_LENGTH(0) + RTA_LENGTH(0) + NLMSG_ALIGN(sizeof(struct ifinfomsg)) + RTA_LENGTH(0) + RTA_ALIGN(veth1_len);;
 	iov[2].iov_base = &rta;
 	iov[2].iov_len = RTA_LENGTH(0);
 
@@ -131,7 +145,51 @@ int create_veth(int sock) {
 	iov[4].iov_base = type;
 	iov[4].iov_len = RTA_ALIGN(VETH_LEN);
 
-	return send_and_ack(sock, iov, 5);
+	struct rtattr rta3 = {
+		.rta_type = IFLA_INFO_DATA,
+		.rta_len = RTA_LENGTH(0) + RTA_LENGTH(0) + NLMSG_ALIGN(sizeof(struct ifinfomsg)) + RTA_LENGTH(0) + RTA_ALIGN(veth1_len),
+	};
+	iov[5].iov_base = &rta3;
+	iov[5].iov_len = RTA_LENGTH(0);
+
+	struct rtattr rta4 = {
+		.rta_type =  VETH_INFO_PEER,
+		.rta_len = RTA_LENGTH(0) + NLMSG_ALIGN(sizeof(struct ifinfomsg)) + RTA_LENGTH(0) + RTA_ALIGN(veth1_len),
+	};
+	iov[6].iov_base = &rta4;
+	iov[6].iov_len = RTA_LENGTH(0);
+
+	// Add hole of size of size ifinfomsg
+	struct ifinfomsg info_msg2 = {};
+	iov[7].iov_base = &info_msg2;
+	iov[7].iov_len = NLMSG_ALIGN(sizeof(struct ifinfomsg));
+	
+
+	struct rtattr rta5 = {
+		.rta_type = IFLA_IFNAME,
+		.rta_len = RTA_LENGTH(veth1_len),
+	};
+	iov[8].iov_base = &rta5;
+	iov[8].iov_len = RTA_LENGTH(0);
+
+	char veth1_copy[IFNAMSIZ];
+	memcpy(veth1_copy, veth1, veth1_len);
+	iov[9].iov_base = veth1_copy;
+	iov[9].iov_len = RTA_ALIGN(veth1_len);
+
+	struct rtattr rta6 = {
+		.rta_type = IFLA_IFNAME,
+		.rta_len = RTA_LENGTH(veth0_len),
+	};
+	iov[10].iov_base = &rta6;
+	iov[10].iov_len = RTA_LENGTH(0);
+
+	char veth0_copy[IFNAMSIZ];
+	memcpy(veth0_copy, veth0, veth0_len);
+	iov[11].iov_base = veth0_copy;
+	iov[11].iov_len = RTA_ALIGN(veth0_len);
+
+	return send_and_ack(sock, iov, 12);
 }
 
 int delete_veth(int sock, const char * eth) {
@@ -248,7 +306,12 @@ int add_local_route(int sock, const char * gw, const char * eth, int dst_len) {
 		fprintf(stderr, "Invalid IP address: %s\n", gw);
 		return 1;
 	}
-	ipv4_addr[3] = 0;
+	if (dst_len == 24) {
+		ipv4_addr[3] = 0;
+	} else {
+		fprintf(stderr, "For the time being, only /24 local routes are supported (dst_len=%d).\n", dst_len);
+		return 1;
+	}
 	//fprintf(stderr, "Ip address: %d.%d.%d.%d\n", ipv4_addr[0], ipv4_addr[1], ipv4_addr[2], ipv4_addr[3]);
 
 	unsigned eth_dev;
@@ -671,6 +734,9 @@ int main(int argc, char * argv[]) {
 	FILE * fp;
 	char * child_stack_ptr, *child_stack = NULL;
 
+	const char * veth0 = "v_external";
+	const char * veth1 = "v_internal";
+
 	child_stack = (char *)malloc(NUMBER_PAGES*getpagesize());
 	if (!child_stack) {
 		fprintf(stderr, "Unable to prepare child stack.\n");
@@ -692,15 +758,15 @@ int main(int argc, char * argv[]) {
 		goto finalize;
 	}
 
-	if ((rc = create_veth(sock))) {
-		fprintf(stderr, "Failed to create veth device.\n");
+	if ((rc = create_veth(sock, veth0, veth1))) {
+		fprintf(stderr, "Failed to create veth devices %s/%s.\n", veth0, veth1);
 		goto finalize;
 	}
 	created = 1;
 
 	//printf("Created a new veth device.\n");
 	routed = 1;
-	if (!(addr = create_outer_routing("./nat_script.sh", "JOBID", "veth0"))) {
+	if (!(addr = create_outer_routing("./nat_script.sh", "JOBID", veth0))) {
 		fprintf(stderr, "Failed to create the routing.\n");
 		goto finalize;
 	}
@@ -708,7 +774,7 @@ int main(int argc, char * argv[]) {
 	// fork/exec the child process (actually, clone/exec so we can manipulate the namespaces)
 	struct child_info info = {
 		.addr = addr,
-		.eth = "veth1",
+		.eth = veth1,
 	};
 	info.p2c[0] = p2c[0]; info.p2c[1] = p2c[1];
 	info.c2p[0] = c2p[0]; info.c2p[1] = c2p[1];
@@ -728,7 +794,7 @@ int main(int argc, char * argv[]) {
 	close(p2c[0]); p2c[0] = -1;
 	close(c2p[1]); c2p[1] = -1;
 
-	if ((rc = set_netns(sock, "veth1", fork_pid))) {
+	if ((rc = set_netns(sock, veth1, fork_pid))) {
 		fprintf(stderr, "Failed to set ns\n");
 		write(p2c[1], &rc, sizeof(int));
 		goto finalize;
@@ -773,13 +839,13 @@ int main(int argc, char * argv[]) {
 finalize:
 	if (created) {
 		//fprintf(stderr, "Trying to delete the created veth device.\n");
-		if (delete_veth(sock, "veth0")) {
-			fprintf(stderr, "Unable to cleanup created device veth0.\n");
+		if (delete_veth(sock, veth0)) {
+			fprintf(stderr, "Unable to cleanup created device %s.\n", veth0);
 			rc = 2;
 		}
 	}
 	if (routed) {
-		if (delete_outer_routing("./nat_delete_script.sh", "JOBID", "veth0")) {
+		if (delete_outer_routing("./nat_delete_script.sh", "JOBID", veth0)) {
 			fprintf(stderr, "Unable to successfully delete routes for %s\n", "JOBID");
 		}
 	}

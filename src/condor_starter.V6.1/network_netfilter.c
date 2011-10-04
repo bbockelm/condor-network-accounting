@@ -21,7 +21,7 @@ static const char *hooknames[] = {
 	[NF_IP_POST_ROUTING]     = "POSTROUTING",
 };
 
-int find_rules(struct ipt_entry * entry, int (*match_fcn)(const char *, long long) ) {
+static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const char *, long long) ) {
 
 	char *elems = entry->elems;
 	
