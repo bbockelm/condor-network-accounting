@@ -874,19 +874,6 @@ const char * const ATTR_SSH_KEYGEN_ARGS = "SSHKeyGenArgs";
 const char * const ATTR_SOCK = "sock";
 const char * const ATTR_JOB_AD_INFORMATION_ATTRS = "JobAdInformationAttrs";
 
-
-//************* Added for Amazon Jobs ***************************//
-const char * const ATTR_AMAZON_PUBLIC_KEY = "AmazonPublicKey";
-const char * const ATTR_AMAZON_PRIVATE_KEY = "AmazonPrivateKey";
-const char * const ATTR_AMAZON_AMI_ID = "AmazonAmiID";
-const char * const ATTR_AMAZON_SECURITY_GROUPS = "AmazonSecurityGroups";
-const char * const ATTR_AMAZON_KEY_PAIR_FILE = "AmazonKeyPairFile";
-const char * const ATTR_AMAZON_USER_DATA = "AmazonUserData";
-const char * const ATTR_AMAZON_USER_DATA_FILE = "AmazonUserDataFile";
-const char * const ATTR_AMAZON_REMOTE_VM_NAME = "AmazonRemoteVirtualMachineName";
-const char * const ATTR_AMAZON_INSTANCE_TYPE = "AmazonInstanceType";
-//************* End of changes for Amamzon Jobs *****************//
-
 //************* Added for EC2 Jobs ***************************//
 const char * const ATTR_EC2_ACCESS_KEY_ID = "EC2AccessKeyId";
 const char * const ATTR_EC2_SECRET_ACCESS_KEY = "EC2SecretAccessKey";
@@ -956,4 +943,6 @@ const char * const ATTR_TRANSFER_QUEUE_NUM_WAITING_TO_UPLOAD = "TransferQueueNum
 const char * const ATTR_TRANSFER_QUEUE_NUM_WAITING_TO_DOWNLOAD = "TransferQueueNumWaitingToDownload";
 const char * const ATTR_TRANSFER_QUEUE_UPLOAD_WAIT_TIME = "TransferQueueUploadWaitTime";
 const char * const ATTR_TRANSFER_QUEUE_DOWNLOAD_WAIT_TIME = "TransferQueueDownloadWaitTime";
-
+const char * const ATTR_MACHINE_MAX_VACATE_TIME = "MachineMaxVacateTime";
+const char * const ATTR_JOB_MAX_VACATE_TIME = "JobMaxVacateTime";
+const char * const ATTR_WANT_GRACEFUL_REMOVAL = "WantGracefulRemoval";

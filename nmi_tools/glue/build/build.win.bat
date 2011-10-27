@@ -97,6 +97,13 @@ set PATH=%SystemRoot%\system32;%SystemRoot%;%PERL_PATH%;%MSCONFIG_TOOLS_DIR%;%VS
 set INCLUDE=%BUILD_ROOT%\src\condor_utils
 @echo INCLUDE=%INCLUDE%
 
+:: pick condor version out of cmake files
+if NOT "~%2"=="~" (
+   set BUILD_VERSION=%2
+) else (
+   for /f "tokens=2 delims=) " %%I in ('grep set.VERSION CMakeLists.txt') do SET BUILD_VERSION=%%~I
+)
+
 @echo ----  build.win.bat ENVIRONMENT --------------------------------
 set
 @echo ----  end build.win.bat ENVIRONMENT ----------------------------
@@ -129,19 +136,35 @@ cmake.exe -DBUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=release_dir -P cmak
 goto finis
    
 :ZIP
-@echo zipping up release directory %BUILD_ROOT%\release_dir
-@echo on
+@echo ZIPPING up build logs
+:: zip build products before zip the release directory so we don't include condor zip file build_products
+izip -r build_products.zip * -i *.cmake -i *.txt -i *.htm -i *.map -i *.vcproj -i *.sln -i *.log -i *.stamp* -i param_info* 
+@echo ZIPPING up release directory %BUILD_ROOT%\release_dir
 pushd %BUILD_ROOT%\release_dir
-izip -r ..\condor-%2winnt-x86.zip *
+izip -r ..\condor-%BUILD_VERSION%-winnt-x86.zip *
 dir .
 popd
-@echo off
 goto finis   
    
+:ZIP_ALL
+@echo ZIPPING up ALL build products
+:: zip build products before zip the release directory so we don't include condor zip file build_products
+dir
+izip -r -q build_products.zip  bld_external build CMakeFiles doc externals nmi_tools soar src -x condor*.zip
+izip -D -q build_products.zip *
+goto finis   
+
+:ZIP_EXTERNALS
+@echo ZIPPING up externals from bld_external and externals directories
+:: zip build products before zip the release directory so we don't include condor zip file build_products
+dir bld_external
+izip -r build_externals.zip  bld_external externals
+goto finis   
+
 :MSI
 :MAKE_MSI
 :NATIVE
-@echo %BUILD_ROOT%\release_dir\etc\WiX\do_wix %BUILD_ROOT\release_dir %BUILD_ROOT\condor-%2winnt-x86.msi
+@echo %BUILD_ROOT%\release_dir\etc\WiX\do_wix %BUILD_ROOT\release_dir %BUILD_ROOT\condor-%BUILD_VERSION%-winnt-x86.msi
 @echo TODO: fix so that do_wix.bat can run in NMI. %ERRORLEVEL%
 @echo on
 dir %BUILD_ROOT%\release_dir
@@ -149,7 +172,7 @@ dir %BUILD_ROOT%
 @echo off
 :: reset set errorlevel to 0
 verify >NUL
-:: call %BUILD_ROOT%\release_dir\etc\WiX\do_wix.bat %BUILD_ROOT\release_dir %BUILD_ROOT\condor-%2winnt-x86.msi
+:: call %BUILD_ROOT%\release_dir\etc\WiX\do_wix.bat %BUILD_ROOT\release_dir %BUILD_ROOT\condor-%BUILD_VERSION%-winnt-x86.msi
 @echo ERRORLEVEL=%ERRORLEVEL%
 goto finis
 

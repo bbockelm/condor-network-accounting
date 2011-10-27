@@ -102,9 +102,6 @@ ClassAd *ClusterAd = NULL;
 
 // Explicit template instantiation
 
-/* For daemonCore, etc. */
-DECL_SUBSYSTEM( "SUBMIT", SUBSYSTEM_TYPE_SUBMIT );
-
 ClassAd  *job = NULL;
 
 char	*OperatingSystem;
@@ -371,18 +368,6 @@ const char    *VM_Networking = "vm_networking";
 const char    *VM_Networking_Type = "vm_networking_type";
 
 //
-// Amazon EC2 SOAP Parameters
-//
-const char* AmazonPublicKey = "amazon_public_key";
-const char* AmazonPrivateKey = "amazon_private_key";
-const char* AmazonAmiID = "amazon_ami_id";
-const char* AmazonUserData = "amazon_user_data";
-const char* AmazonUserDataFile = "amazon_user_data_file";
-const char* AmazonSecurityGroups = "amazon_security_groups";
-const char* AmazonKeyPairFile = "amazon_keypair_file";
-const char* AmazonInstanceType = "amazon_instance_type";
-
-//
 // EC2 Query Parameters
 //
 const char* EC2AccessKeyId = "ec2_access_key_id";
@@ -416,6 +401,8 @@ const char* DeltacloudUserData = "deltacloud_user_data";
 
 char const *next_job_start_delay = "next_job_start_delay";
 char const *next_job_start_delay2 = "NextJobStartDelay";
+char const *want_graceful_removal = "want_graceful_removal";
+char const *job_max_vacate_time = "job_max_vacate_time";
 
 const char * REMOTE_PREFIX="Remote_";
 
@@ -784,8 +771,11 @@ main( int argc, char *argv[] )
 	char	*cmd_file = NULL;
 	int i;
 	MyString method;
+	param_functions *p_funcs = NULL;
 
 	setbuf( stdout, NULL );
+
+	set_mySubSystem( "SUBMIT", SUBSYSTEM_TYPE_SUBMIT );
 
 #if !defined(WIN32)
 		// Make sure root isn't trying to submit.
@@ -833,7 +823,8 @@ main( int argc, char *argv[] )
 			} else if ( match_prefix( ptr[0], "-debug" ) ) {
 				// dprintf to console
 				Termlog = 1;
-				dprintf_config( "TOOL" );
+				p_funcs = get_param_functions();
+				dprintf_config( "TOOL", p_funcs );
 			} else if ( match_prefix( ptr[0], "-spool" ) ) {
 				Remote++;
 				DisableFileChecks = 1;
@@ -969,12 +960,8 @@ main( int argc, char *argv[] )
 		exit(1);
 	}
 
-	char *dis_check = param("SUBMIT_SKIP_FILECHECKS");
-	if ( dis_check ) {
-		if (dis_check[0]=='T' || dis_check[0]=='t') {
-			DisableFileChecks = 1;
-		}
-		free(dis_check);
+	if (!DisableFileChecks) {
+		DisableFileChecks = param_boolean_crufty("SUBMIT_SKIP_FILECHECKS", false) ? 1 : 0;
 	}
 
 	// if we are dumping to a file, we never want to check file permissions
@@ -1512,9 +1499,8 @@ SetExecutable()
 	if ( JobUniverse == CONDOR_UNIVERSE_VM ||
 		 ( JobUniverse == CONDOR_UNIVERSE_GRID &&
 		   JobGridType != NULL &&
-		   ( strcasecmp( JobGridType, "amazon" ) == MATCH ||
-			 strcasecmp( JobGridType, "ec2" ) == MATCH ||
-			 strcasecmp( JobGridType, "deltacloud" ) == MATCH ) ) ) {
+		   ( strcasecmp( JobGridType, "ec2" ) == MATCH ||
+		     strcasecmp( JobGridType, "deltacloud" ) == MATCH ) ) ) {
 		ignore_it = true;
 	}
 
@@ -1795,7 +1781,7 @@ SetUniverse()
 			// Validate
 			// Valid values are (as of 7.5.1): nordugrid, globus,
 			//    gt2, gt5, gt4, infn, blah, pbs, lsf, nqs, naregi, condor,
-			//    amazon, unicore, cream, deltacloud, ec2
+			//    unicore, cream, deltacloud, ec2
 
 			// CRUFT: grid-type 'blah' is deprecated. Now, the specific batch
 			//   system names should be used (pbs, lsf). Glite are the only
@@ -1812,7 +1798,6 @@ SetUniverse()
 				(strcasecmp (JobGridType, "naregi") == MATCH) ||
 				(strcasecmp (JobGridType, "condor") == MATCH) ||
 				(strcasecmp (JobGridType, "nordugrid") == MATCH) ||
-				(strcasecmp (JobGridType, "amazon") == MATCH) ||	// added for amazon job
 				(strcasecmp (JobGridType, "ec2") == MATCH) ||
 				(strcasecmp (JobGridType, "deltacloud") == MATCH) ||
 				(strcasecmp (JobGridType, "unicore") == MATCH) ||
@@ -1827,7 +1812,7 @@ SetUniverse()
 
 				fprintf( stderr, "\nERROR: Invalid value '%s' for grid type\n", JobGridType );
 				fprintf( stderr, "Must be one of: gt2, gt4, gt5, pbs, lsf, "
-						 "nqs, condor, nordugrid, unicore, amazon, ec2, deltacloud, or cream\n" );
+						 "nqs, condor, nordugrid, unicore, ec2, deltacloud, or cream\n" );
 				exit( 1 );
 			}
 		}			
@@ -2461,8 +2446,7 @@ SetTransferFiles()
 
 	if (should_transfer == STF_NO &&
 		(in_files_specified || out_files_specified)) { // (F)
-		MyString err_msg;
-		err_msg += "\nERROR: you specified files you want Condor to "
+		err_msg = "\nERROR: you specified files you want Condor to "
 			"transfer via \"";
 		if( in_files_specified ) {
 			err_msg += "transfer_input_files";
@@ -2740,7 +2724,6 @@ SetTransferFiles()
 			//but they did not turn on transfer_files, so they are
 			//going to be confused when the executable is _not_
 			//transfered!  Better bail out.
-			MyString err_msg;
 			err_msg = "\nERROR: You explicitly requested that the "
 				"executable be transfered, but for this to work, you must "
 				"enable Condor's file transfer functionality.  You need "
@@ -3604,6 +3587,32 @@ SetNotifyUser()
 		buffer.sprintf( "%s = \"%s\"", ATTR_NOTIFY_USER, who);
 		InsertJobExpr (buffer);
 		free(who);
+	}
+}
+
+void
+SetWantGracefulRemoval()
+{
+	char *how = condor_param( want_graceful_removal, ATTR_WANT_GRACEFUL_REMOVAL );
+	MyString buffer;
+
+	if( how ) {
+		buffer.sprintf( "%s = %s", ATTR_WANT_GRACEFUL_REMOVAL, how );
+		InsertJobExpr (buffer);
+		free( how );
+	}
+}
+
+void
+SetJobMaxVacateTime()
+{
+	char *expr = condor_param( job_max_vacate_time, ATTR_JOB_MAX_VACATE_TIME );
+	MyString buffer;
+
+	if( expr ) {
+		buffer.sprintf( "%s = %s", ATTR_JOB_MAX_VACATE_TIME, expr );
+		InsertJobExpr (buffer);
+		free( expr );
 	}
 }
 
@@ -4875,17 +4884,13 @@ SetGridParams()
 			InsertJobExpr (buffer);
 		}
 
-		if ( strcasecmp( tmp, "amazon" ) == 0 ||
-			 strcasecmp( tmp, "ec2" ) == 0 ) {
-			fprintf(stderr, "\nERROR: Amazon EC2 grid jobs require a "
+		if ( strcasecmp( tmp, "ec2" ) == 0 ) {
+			fprintf(stderr, "\nERROR: EC2 grid jobs require a "
 					"service URL\n");
 			DoCleanup( 0, 0, NULL );
 			exit( 1 );
 		}
 		
-		// TODO: TSTCLAIR remove in 7.9 series.
-		if ( strcasecmp( tmp, "amazon" ) == 0 ) 
-			fprintf(stderr, "\nWARNING: Amazon grid jobs are no longer supported, please use EC2\n");
 
 		free( tmp );
 
@@ -5001,104 +5006,6 @@ SetGridParams()
 		exit( 1 );
 	}
 	
-	//
-	// Amazon grid-type submit attributes
-	//
-	if ( (tmp = condor_param( AmazonPublicKey, ATTR_AMAZON_PUBLIC_KEY )) ) {
-		// check public key file can be opened
-		if ( !DisableFileChecks ) {
-			if( ( fp=safe_fopen_wrapper_follow(full_path(tmp),"r") ) == NULL ) {
-				fprintf( stderr, "\nERROR: Failed to open public key file %s (%s)\n", 
-							 full_path(tmp), strerror(errno));
-				exit(1);
-			}
-			fclose(fp);
-		}
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_PUBLIC_KEY, full_path(tmp) );
-		InsertJobExpr( buffer.Value() );
-		free( tmp );
-	} else if ( JobGridType && strcasecmp( JobGridType, "amazon" ) == 0 ) {
-		fprintf(stderr, "\nERROR: Amazon jobs require a \"%s\" parameter\n", AmazonPublicKey );
-		DoCleanup( 0, 0, NULL );
-		exit( 1 );
-	}
-	
-	if ( (tmp = condor_param( AmazonPrivateKey, ATTR_AMAZON_PRIVATE_KEY )) ) {
-		// check private key file can be opened
-		if ( !DisableFileChecks ) {
-			if( ( fp=safe_fopen_wrapper_follow(full_path(tmp),"r") ) == NULL ) {
-				fprintf( stderr, "\nERROR: Failed to open private key file %s (%s)\n", 
-							 full_path(tmp), strerror(errno));
-				exit(1);
-			}
-			fclose(fp);
-		}
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_PRIVATE_KEY, full_path(tmp) );
-		InsertJobExpr( buffer.Value() );
-		free( tmp );
-	} else if ( JobGridType && strcasecmp( JobGridType, "amazon" ) == 0 ) {
-		fprintf(stderr, "\nERROR: Amazon jobs require a \"%s\" parameter\n", AmazonPrivateKey );
-		DoCleanup( 0, 0, NULL );
-		exit( 1 );
-	}
-	
-	// AmazonKeyPairFile is not a necessary parameter
-	if( (tmp = condor_param( AmazonKeyPairFile, ATTR_AMAZON_KEY_PAIR_FILE )) ) {
-		// for the relative path, the keypair output file will be written to the IWD
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_KEY_PAIR_FILE, full_path(tmp) );
-		free( tmp );
-		InsertJobExpr( buffer.Value() );
-	}
-	
-	// AmazonGroupName is not a necessary parameter
-	if( (tmp = condor_param( AmazonSecurityGroups, ATTR_AMAZON_SECURITY_GROUPS )) ) {
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_SECURITY_GROUPS, tmp );
-		free( tmp );
-		InsertJobExpr( buffer.Value() );
-	}
-	
-	if ( (tmp = condor_param( AmazonAmiID, ATTR_AMAZON_AMI_ID )) ) {
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_AMI_ID, tmp );
-		InsertJobExpr( buffer.Value() );
-		free( tmp );
-	} else if ( JobGridType && strcasecmp( JobGridType, "amazon" ) == 0 ) {
-		fprintf(stderr, "\nERROR: Amazon jobs require a \"%s\" parameter\n", AmazonAmiID );
-		DoCleanup( 0, 0, NULL );
-		exit( 1 );
-	}
-	
-	// AmazonInstanceType is not a necessary parameter
-	if( (tmp = condor_param( AmazonInstanceType, ATTR_AMAZON_INSTANCE_TYPE )) ) {
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_INSTANCE_TYPE, tmp );
-		free( tmp );
-		InsertJobExpr( buffer.Value() );
-	}
-	
-	// AmazonUserData is not a necessary parameter
-	if( (tmp = condor_param( AmazonUserData, ATTR_AMAZON_USER_DATA )) ) {
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_USER_DATA, tmp);
-		free( tmp );
-		InsertJobExpr( buffer.Value() );
-	}	
-
-	// AmazonUserDataFile is not a necessary parameter
-	if( (tmp = condor_param( AmazonUserDataFile, ATTR_AMAZON_USER_DATA_FILE )) ) {
-		// check user data file can be opened
-		if ( !DisableFileChecks ) {
-			if( ( fp=safe_fopen_wrapper_follow(full_path(tmp),"r") ) == NULL ) {
-				fprintf( stderr, "\nERROR: Failed to open user data file %s (%s)\n", 
-								 full_path(tmp), strerror(errno));
-				exit(1);
-			}
-			fclose(fp);
-		}
-		buffer.sprintf( "%s = \"%s\"", ATTR_AMAZON_USER_DATA_FILE, 
-				full_path(tmp) );
-		free( tmp );
-		InsertJobExpr( buffer.Value() );
-	}
-
-
 	//
 	// EC2 grid-type submit attributes
 	//
@@ -6061,6 +5968,8 @@ queue(int num)
 		SetRemoteInitialDir();
 		SetExitRequirements();
 		SetOutputDestination();
+		SetWantGracefulRemoval();
+		SetJobMaxVacateTime();
 
         // really a command, needs to happen before any calls to check_open
 		SetJobDisableFileChecks();
@@ -6824,14 +6733,9 @@ init_params()
 		string_to_stm( method, STMethod );
 	}
 
-	tmp = param( "WARN_ON_UNUSED_SUBMIT_FILE_MACROS" );
-	if ( NULL != tmp ) {
-		if( (*tmp == 'f' || *tmp == 'F') ) {
-			WarnOnUnusedMacros = 0;
-		}
-		free( tmp );
-	}
-
+	WarnOnUnusedMacros =
+		param_boolean_crufty("WARN_ON_UNUSED_SUBMIT_FILE_MACROS",
+							 WarnOnUnusedMacros ? true : false) ? 1 : 0;
 }
 
 int
@@ -7671,7 +7575,6 @@ SetVMParams()
 
 		// Read the parameter of xen_transfer_files 
 		char *transfer_files = NULL;
-		const char *transf_attr_name;
 
         transfer_files = condor_param("transfer_input_files");
         if (transfer_files)
@@ -7994,6 +7897,3 @@ SetVMParams()
 	// So we need to add necessary VM attributes to Requirements
 	SetVMRequirements();
 }
-
-
-#include "daemon_core_stubs.h"

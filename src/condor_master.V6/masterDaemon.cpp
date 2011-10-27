@@ -220,10 +220,8 @@ int
 daemon::runs_on_this_host()
 {
 	char	*tmp;
-	char	hostname[512];
 	static bool this_host_addr_cached = false;
 	static std::vector<condor_sockaddr> this_host_addr;
-	struct hostent	*hp;
 	int		i, j;
 
 
@@ -577,7 +575,7 @@ int daemon::RealStart( )
 	shortname = condor_basename( process_name );
 
 	if( access(process_name,X_OK) != 0 ) {
-		dprintf(D_ALWAYS, "%s: Cannot execute\n", process_name );
+		dprintf(D_ALWAYS, "%s: Cannot execute (errno=%d, %s)\n", process_name, errno, strerror(errno) );
 		pid = 0; 
 		// Schedule to try and restart it a little later
 		Restart();

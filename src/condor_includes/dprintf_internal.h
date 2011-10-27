@@ -17,18 +17,19 @@
  *
  ***************************************************************/
 
-#include "condor_common.h"
-#include "condor_debug.h"
-#include "amazongahp_common.h"
-#include "request.h"
+#define _FILE_OFFSET_BITS 64
 
-Request::Request (const char *cmd)
-{   
-	m_worker = NULL;
-	m_raw_cmd = cmd;
+#include <string>
+#include <map>
+struct DebugFileInfo
+{
+	FILE *debugFP;
+	int debugFlags;
+	std::string logPath;
+	off_t maxLog;
+	int maxLogNum;
 
-	if ( parse_gahp_command(cmd, &m_args) )
-		m_reqid = (int)strtol(m_args.argv[1], (char **)NULL, 10);
-	else
-		m_reqid = -1;
-}
+	DebugFileInfo() : debugFlags(0), debugFP(0), maxLog(0), maxLogNum(0) {}
+	DebugFileInfo(const DebugFileInfo &debugFileInfo);
+	~DebugFileInfo();
+};

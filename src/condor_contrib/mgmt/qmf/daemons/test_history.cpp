@@ -23,8 +23,6 @@
 #include "HistoryProcessingUtils.h"
 #include "qpid/agent/ManagementAgent.h"
 
-DECL_SUBSYSTEM("TOOL", SUBSYSTEM_TYPE_TOOL);
-
 using namespace qpid::management;
 
 extern MyString m_path;
@@ -34,7 +32,7 @@ int
 main(int /*argc*/, char **argv)
 {
 	Termlog = 1;
-	dprintf_config("TOOL");
+	dprintf_config("TOOL", get_param_functions());
 
 	singleton = new ManagementAgent::Singleton();
 
@@ -62,7 +60,7 @@ int
 main2(int argc, char **argv)
 {
 	Termlog = 1;
-	dprintf_config("TOOL");
+	dprintf_config("TOOL", get_param_functions());
 
 	const char *file = NULL;
 	const MyString path(argv[1]);

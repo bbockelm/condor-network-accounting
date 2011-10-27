@@ -808,8 +808,13 @@ UWCS_MaxJobRetirementTime = 0
 ##  CLAIM_WORKLIFE undefined (infinite).
 #UWCS_CLAIM_WORKLIFE = 1200
 
-# Kill jobs if they have taken too long to vacate gracefully
-UWCS_KILL = $(ActivityTimer) > $(MaxVacateTime) 
+# How long to allow a job to vacate gracefully.  After this time,
+# the job is killed.
+MachineMaxVacateTime = $(MaxVacateTime) 
+
+# Abort graceful eviction of a job, even though it has not
+# yet used all the time allotted by MachineMaxVacateTime.
+UWCS_KILL = false
 
 ##  Only define vanilla versions of these if you want to make them
 ##  different from the above settings.
@@ -820,7 +825,7 @@ UWCS_KILL = $(ActivityTimer) > $(MaxVacateTime)
 #PREEMPT_VANILLA  = ( ((Activity == "Suspended") && \
 #                     ($(ActivityTimer) > $(MaxSuspendTime))) \
 #                     || (SUSPEND_VANILLA && (WANT_SUSPEND == False)) )
-#KILL_VANILLA    = $(ActivityTimer) > $(MaxVacateTime)
+#KILL_VANILLA    = false
 
 ##  Checkpoint every 3 hours on average, with a +-30 minute random
 ##  factor to avoid having many jobs hit the checkpoint server at
@@ -1981,23 +1986,6 @@ CREAM_GAHP = $(SBIN)/cream_gahp
 DELTACLOUD_GAHP = $(SBIN)/deltacloud_gahp
 
 ##
-## EC2 (SOAP): Universe = Grid, Grid_Resource = Amazon
-##
-
-## The location of the amazon_gahp program, required
-AMAZON_GAHP = $(SBIN)/amazon_gahp
-
-## Location of log files, useful for debugging, must be in
-## a directory writable by any user, such as /tmp
-#AMAZON_GAHP_DEBUG = D_FULLDEBUG
-AMAZON_GAHP_LOG = /tmp/AmazonGahpLog.$(USERNAME)
-
-## As of this writing Amazon EC2 has a hard limit of 20 concurrently
-## running instances, so a limit of 20 is imposed so the GridManager
-## does not waste its time sending requests that will be rejected.
-GRIDMANAGER_MAX_SUBMITTED_JOBS_PER_RESOURCE_AMAZON = 20
-
-##
 ## EC2 (REST): Universe = Grid, Grid_Resource = ec2
 ##
 
@@ -2009,7 +1997,7 @@ EC2_GAHP = $(SBIN)/ec2_gahp
 #EC2_GAHP_DEBUG = D_FULLDEBUG
 EC2_GAHP_LOG = /tmp/EC2GahpLog.$(USERNAME)
 
-## As of this writing Amazon EC2 has a hard limit of 20 concurrently
+## As of this writing EC2 has a hard limit of 20 concurrently
 ## running instances, so a limit of 20 is imposed so the GridManager
 ## does not waste its time sending requests that will be rejected.
 GRIDMANAGER_MAX_SUBMITTED_JOBS_PER_RESOURCE_EC2 = 20

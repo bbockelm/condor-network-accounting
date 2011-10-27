@@ -219,8 +219,9 @@ our %submit_info = (
 	'x86_64_winnt_6.1'		=> {
 		'build' => {
 			'configure_args' => { 
+			 # TJ 10/4/2011 new batlab can't handle quoted strings as args at the moment.
 			 # '-G \"Visual Studio 9 2008\"' => undef,
-			  '-D_VERBOSE:BOOL'	 => 'OFF', 
+			  '-DCMAKE_SUPPRESS_REGENERATION:BOOL' => 'TRUE', # because the windows VM doesn't keep time very well.
             },
 			'prereqs'	=> undef,
 			'xtests'	=> undef,
@@ -239,7 +240,11 @@ our %submit_info = (
 	##########################################################################
 	'x86_winnt_6.1'		=> {
 		'build' => {
-			'configure_args' => { '-G \"Visual Studio 9 2008\"' => undef },
+			'configure_args' => { 
+			 # TJ 10/4/2011 new batlab can't handle quoted strings as args at the moment.
+			 # '-G \"Visual Studio 9 2008\"' => undef,
+			  '-DCMAKE_SUPPRESS_REGENERATION:BOOL' => 'TRUE', # because the windows VM doesn't keep time very well.
+			},
 			'prereqs'	=> undef,
 			'xtests'	=> undef,
 		},
@@ -414,14 +419,7 @@ our %submit_info = (
 		},
 	},
 
-	##########################################################################
-	# Platform RHEL 6 on x86_64. Unmanaged.
-	##########################################################################
 	'x86_64_rhap_6.0-updated'	=> 'x86_64_rhap_6.0',
-
-	#################################################################
-	# Platform RHEL 6.1 on x86_64. This one is updated by the batlab.
-	#################################################################
 	'x86_64_rhap_6.1-updated'	=> 'x86_64_rhap_6.0',
 
 	# This is the new batlab one
@@ -440,6 +438,9 @@ our %submit_info = (
 			'testclass'	=> [ @default_testclass ],
 		},
 	},
+
+    'x86_64_sl_6.0' => 'x86_64_rhap_6.1',
+
 	##########################################################################
 	# Platform RHEL 5 on x86_64
 	##########################################################################
@@ -605,7 +606,6 @@ our %submit_info = (
 	# Platform Mac OSX 10.6 with updates on x86_64
 	##########################################################################
 	'x86_64_macos_10.6-updated' => 'x86_64_macos_10.6',
-
 
 	##########################################################################
 	# Platform RHEL 5 on x86
@@ -1006,7 +1006,6 @@ our %submit_info = (
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
-								  '-DWITHOUT_AMAZON_TEST:BOOL' => 'ON',
 								  '-DWITH_CURL:BOOL' => 'ON',
 								  '-DWITH_LIBVIRT:BOOL' => 'ON',
 								  '-DWITH_LIBXML2:BOOL' => 'ON',
@@ -1033,7 +1032,6 @@ our %submit_info = (
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 								  '-DWITHOUT_SOAP_TEST:BOOL' => 'ON',
-								  '-DWITHOUT_AMAZON_TEST:BOOL' => 'ON',
 								  '-DWITH_CURL:BOOL' => 'ON',
 								  '-DWITH_LIBVIRT:BOOL' => 'ON',
 								  '-DWITH_LIBXML2:BOOL' => 'ON',
@@ -1060,7 +1058,6 @@ our %submit_info = (
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 				'-DWITHOUT_SOAP_TEST:BOOL=ON' => undef,
-				'-DWITHOUT_AMAZON_TEST:BOOL=ON' => undef,
 				'-DENABLE_JAVA_TESTS:BOOL=OFF' => undef,
 				'-DWITH_CURL:BOOL=OFF' => undef,
 				'-DWITH_LIBVIRT:BOOL=OFF' => undef,
@@ -1101,7 +1098,6 @@ our %submit_info = (
 		'build' => {
 			'configure_args' => { @minimal_build_configure_args,
 				'-DWITHOUT_SOAP_TEST:BOOL=ON' => undef,
-				'-DWITHOUT_AMAZON_TEST:BOOL=ON' => undef,
 				'-DENABLE_JAVA_TESTS:BOOL=OFF' => undef,
 				'-DWITH_CURL:BOOL=OFF' => undef,
 				'-DWITH_LIBVIRT:BOOL=OFF' => undef,

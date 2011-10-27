@@ -28,7 +28,6 @@
 #include "basename.h"
 #include "qmgmt.h"
 #include "condor_qmgr.h"
-#include "log_transaction.h"
 #include "log.h"
 #include "classad_collection.h"
 #include "prio_rec.h"
@@ -317,35 +316,6 @@ ConvertOldJobAdAttrs( ClassAd *job_ad, bool startup )
 		if ( hold_reason == "Spooling input data files" ) {
 			job_ad->Assign( ATTR_HOLD_REASON_CODE,
 							CONDOR_HOLD_CODE_SpoolingInput );
-		}
-	}
-
-		// CRUFT
-		// Starting in 7.5.4, the GridResource attribute for the amazon
-		// grid-type contains the URL of the service to be submitted
-		// to. Prior to that, only one service could be submitted to,
-		// which was controlled by the config param AMAZON_EC2_URL.
-	if ( universe == CONDOR_UNIVERSE_GRID ) {
-		std::string attr_value;
-		job_ad->LookupString( ATTR_GRID_RESOURCE, attr_value );
-		if ( attr_value == "amazon" ) {
-			char *url = param( "AMAZON_EC2_URL" );
-			if ( url == NULL ) {
-				url = strdup( "https://ec2.amazonaws.com/" );
-			}
-
-			attr_value = "amazon ";
-			attr_value += url;
-			job_ad->Assign( ATTR_GRID_RESOURCE, attr_value );
-
-			if ( job_ad->LookupString( ATTR_GRID_JOB_ID, attr_value ) ) {
-				std::string insert = " ";
-				insert += url;
-				attr_value.insert( 6, insert );
-				job_ad->Assign( ATTR_GRID_JOB_ID, attr_value );
-			}
-
-			free( url );
 		}
 	}
 
@@ -1272,6 +1242,9 @@ QmgmtSetEffectiveOwner(char const *o)
 		if( !isQueueSuperUser(real_owner) ||
 			!SuperUserAllowedToSetOwnerTo( o ) )
 		{
+			dprintf(D_ALWAYS, "SetEffectiveOwner security violation: "
+					"setting owner to %s when active owner is \"%s\"\n",
+					o, real_owner ? real_owner : "(null)" );
 			errno = EACCES;
 			return -1;
 		}
@@ -3917,6 +3890,7 @@ rewriteSpooledJobAd(ClassAd *job_ad, int cluster, int proc, bool modify_ad)
 			free(new_value);
 		}
 	}
+	free(SpoolSpace);
 	return true;
 }
 
