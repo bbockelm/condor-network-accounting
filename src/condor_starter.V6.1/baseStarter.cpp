@@ -973,9 +973,8 @@ CStarter::startSSHD( int /*cmd*/, Stream* s )
 		// about this task.  We avoid needing to know the final exit status
 		// by checking for a magic success string at the end of the output.
 	int setup_reaper = 1;
-	int setup_pid;
 	if( privSepHelper() ) {
-		setup_pid = privSepHelper()->create_process(
+		privSepHelper()->create_process(
 			ssh_to_job_sshd_setup.Value(),
 			setup_args,
 			setup_env,
@@ -989,7 +988,7 @@ CStarter::startSSHD( int /*cmd*/, Stream* s )
 			NULL);
 	}
 	else {
-		setup_pid = daemonCore->Create_Process(
+		daemonCore->Create_Process(
 			ssh_to_job_sshd_setup.Value(),
 			setup_args,
 			PRIV_USER_FINAL,

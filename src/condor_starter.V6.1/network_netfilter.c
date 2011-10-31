@@ -21,15 +21,15 @@ static const char *hooknames[] = {
 	[NF_IP_POST_ROUTING]     = "POSTROUTING",
 };
 
-static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const char *, long long) ) {
+static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const unsigned char *, long long) ) {
 
-	char *elems = entry->elems;
+	unsigned char *elems = entry->elems;
 	
 	size_t idx = 1, offset = 0;
 	//printf("Target offset: %d\n", entry->target_offset);
 	struct xt_entry_match * match = NULL;
 	while (offset < entry->target_offset) {
-		struct xt_entry_match * match = (struct xt_entry_match *)(elems + offset);
+		match = (struct xt_entry_match *)(elems + offset);
 		if (strcmp(match->u.user.name, "comment") == 0) {
 			match_fcn(match->data, entry->counters.bcnt);
 		}
@@ -41,13 +41,10 @@ static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const char *, l
 		idx ++;
 	}
 
+	return 0;
 }
 
-int handle_match(const char * rule_name, long long bytes_matched) {
-	printf("Network%s: %d\n", rule_name, bytes_matched);
-}
-
-int perform_accounting(const char * chain, int (*match_fcn)(const char *, long long) ) {
+int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char *, long long) ) {
 	int sockfd;
 
 	if ((sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
@@ -84,13 +81,13 @@ int perform_accounting(const char * chain, int (*match_fcn)(const char *, long l
 	size_t offset = 0, idx = 1;
 	struct ipt_entry * entry = entries->entrytable;
 	int hook_idx;
-	const char * chain_name = NULL, *old_chain_name = NULL;
+	const unsigned char * chain_name = NULL, *old_chain_name = NULL;
 	while (1) {
 		struct xt_entry_target *my_target = ipt_get_target(entry);
 		if (strcmp(my_target->u.user.name, XT_ERROR_TARGET) == 0) {
 			// User chain
 			chain_name = my_target->data;
-			if (strcmp(chain_name, XT_ERROR_TARGET) == 0) {
+			if (strcmp((const char *)chain_name, XT_ERROR_TARGET) == 0) {
 				break;
 			}
 		} else {
@@ -98,13 +95,13 @@ int perform_accounting(const char * chain, int (*match_fcn)(const char *, long l
 			for (hook_idx=0; hook_idx < NF_IP_NUMHOOKS; hook_idx++) {
 				if (info.valid_hooks & (1 << hook_idx)) {
 					if  (info.hook_entry[hook_idx] == offset) {
-						chain_name = hooknames[hook_idx];
+						chain_name = (const unsigned char *)hooknames[hook_idx];
 					}
 				}
 			}
 		}
 
-		if ((chain_name == old_chain_name) && (strcmp(chain, chain_name) == 0)) {
+		if ((chain_name == old_chain_name) && (strcmp((const char *)chain, (const char *)chain_name) == 0)) {
 			//fprintf(stderr, "Entry %d, offset %d, chain %s\n", idx, offset, chain_name);
 			find_rules(entry, match_fcn);
 
@@ -124,16 +121,6 @@ int perform_accounting(const char * chain, int (*match_fcn)(const char *, long l
 			break;
 	}
 
+	return 0;
 }
-
-/*
-int main(int argc, char * argv[]) {
-
-	if (argc != 2) {
-		fprintf(stderr, "Usage: ./network_netfilter JOBID");
-		return 1;
-	}
-	return perform_accounting(argv[1], handle_match);
-}
-*/
 
