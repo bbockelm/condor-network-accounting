@@ -12,7 +12,7 @@
 NetworkNamespaceManager::NetworkNamespaceManager(std::string uniq_namespace) :
 	m_state(UNCREATED), m_network_namespace(uniq_namespace),
 	m_internal_pipe("i_" + m_network_namespace), m_external_pipe("e_" + m_network_namespace),
-	m_sock(-1)
+	m_sock(-1), m_created_pipe(false)
 	{
 	}
 
@@ -32,7 +32,7 @@ int NetworkNamespaceManager::CreateNamespace() {
 	const char * namespace_script;
 	int rc = 0;
 
-	namespace_script = param("NETWORK_NAMESPACE_SCRIPT");
+	namespace_script = param("NETWORK_NAMESPACE_CREATE_SCRIPT");
 
 	if ((rc = CreateNetworkPipe())) {
 		dprintf(D_ALWAYS, "Unable to create a new set of network pipes; cannot create a namespace.\n");
@@ -88,6 +88,7 @@ int NetworkNamespaceManager::CreateNetworkPipe() {
                 m_state = FAILED;
 		return rc;
         }
+	m_created_pipe = true;
 
 	dprintf(D_FULLDEBUG, "Created a pair of veth devices (%s, %s).\n", m_external_pipe.c_str(), m_internal_pipe.c_str());
         
@@ -136,9 +137,94 @@ int NetworkNamespaceManager::PostCloneChild() {
 		goto finalize_child;
 	}
 
+	m_state = INTERNAL_CONFIGURED;
+
 finalize_child:
 	close(sock);
 failed_socket:
 	return rc;
 
 }
+
+int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
+
+	if (m_state != CREATED) {
+		dprintf(D_ALWAYS, "NetworkNamespaceManager in incorrect state %d to send device to internal namespace\n", m_state);
+		m_state = FAILED;
+		return 1;
+	}
+	
+	int rc;
+	if ((rc = set_netns(m_sock, m_internal_pipe.c_str(), pid))) {
+		dprintf(D_ALWAYS, "Failed to send %s to network namespace %d.\n", m_internal_pipe.c_str(), pid);
+	}
+	return rc;
+
+}
+
+int NetworkNamespaceManager::Cleanup() {
+
+	// Always try to 
+	if (m_state == CLEANED) {
+		dprintf(D_ALWAYS, "Called Cleanup on an already-cleaned NetworkNamespaceManager!\n");
+		return 1;
+	}
+
+	if (m_state == UNCREATED) {
+		// We never created the namespace.  Do nothing.
+		return 0;
+	}
+
+	if (!m_created_pipe) {
+		// Not much to do in this case.
+		return 0;
+	}
+
+	int rc2;
+	rc2 = RunCleanupScript();
+
+	if (m_sock < 0) {
+		dprintf(D_ALWAYS, "Unable to delete device as socket is invalid.\n");
+		return 1;
+	}
+
+	int rc;
+	if ((rc = delete_veth(m_sock, m_external_pipe.c_str()))) {
+		dprintf(D_ALWAYS, "Failed to delete the veth interface; rc=%d\n", rc);
+	}
+
+	return rc2 ? rc2 : rc;
+}
+
+int NetworkNamespaceManager::RunCleanupScript() {
+	const char * namespace_script = param("NETWORK_NAMESPACE_DELETE_SCRIPT");
+
+	ArgList args;
+	args.AppendArg(namespace_script);
+	args.AppendArg(m_network_namespace);
+	args.AppendArg(m_external_pipe);
+
+	FILE *fp = my_popen(args, "r", TRUE);
+	if (fp == NULL) {
+		dprintf(D_ALWAYS, "NetworkNamespaceManager::CreateNamespace: "
+			"my_popen failure on %s: (errno=%d) %s\n",
+			 args.GetArg(0), errno, strerror(errno));
+		m_state = FAILED;
+		return 1;
+	}
+
+	MyString str;
+	while (str.readLine(fp, true));
+	int ret = my_pclose(fp);
+	str.trim();
+	if (ret) {
+		dprintf(D_ALWAYS, "NetworkNamespaceManager::CreateNamespace: %s "
+			"exited with status %d and following output: %s\n",
+			args.GetArg(0), ret, str.Value());
+		m_state = FAILED;
+		return ret;
+	}
+
+	return 0;
+}
+

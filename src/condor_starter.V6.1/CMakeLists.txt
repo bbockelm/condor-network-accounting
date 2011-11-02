@@ -25,6 +25,11 @@ if (HAVE_EXT_GLOBUS)
 	clone_install( condor_starter "${C_SBIN}" "condor_gridshell" "${C_SBIN}" )
 endif()
 
+if(LINUX)
+	install(FILES nat_delete_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
+	install(FILES nat_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
+endif()
+
 # need to add all the other install targets for libexec.
 install ( FILES scimark2lib.jar CondorJavaWrapper.class CondorJavaInfo.class DESTINATION ${C_LIB} )
 

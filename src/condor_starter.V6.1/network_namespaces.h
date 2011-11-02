@@ -58,13 +58,15 @@ public:
 private:
 
 	int CreateNetworkPipe();
+	int RunCleanupScript();
 
 	enum NAMESPACE_STATE {
 		UNCREATED,
 		CREATED,
 		PASSED,
 		INTERNAL_CONFIGURED,
-		FAILED
+		FAILED,
+		CLEANED
 	} m_state;
 	std::string m_network_namespace;
 	std::string m_internal_pipe;
@@ -72,6 +74,7 @@ private:
 	condor_sockaddr m_internal_address;
 	MyString m_internal_address_str;
 	int m_sock;
+	bool m_created_pipe;
 
 };
 
