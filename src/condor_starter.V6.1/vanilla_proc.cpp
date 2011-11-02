@@ -32,6 +32,7 @@
 #include "condor_config.h"
 #include "domain_tools.h"
 #include "classad_helpers.h"
+#include "network_namespaces.h"
 
 #ifdef WIN32
 #include "executable_scripts.WINDOWS.h"
@@ -208,6 +209,20 @@ VanillaProc::StartJob()
 	}
 #endif
 
+#if defined(LINUX)
+
+	// On Linux kernel 2.6.24 and later, we can give each
+	// job its own PID namespace
+	if (param_boolean("USE_PID_NAMESPACES", false)) {
+		if (!can_switch_ids()) {
+			EXCEPT("USE_PID_NAMESPACES enabled, but can't perform this "
+					"call in Linux unless running as root.");
+		}
+		fi.want_pid_namespace = true;
+	}
+	dprintf(D_FULLDEBUG, "PID namespace option: %s\n", fi.want_pid_namespace ? "true" : "false");
+#endif
+
 #if defined(HAVE_EXT_LIBCGROUP)
 	// Determine the cgroup
 	char* cgroup_base = param("BASE_CGROUP"), *cgroup = NULL;
@@ -229,9 +244,14 @@ VanillaProc::StartJob()
 	}
 #endif
 
+	NetworkNamespaceManager * network_manager = NULL;
+	if (param_boolean("USE_NETWORK_NAMESPACES", false)) {
+		
+	}
+
 	// have OsProc start the job
 	//
-	int retval = OsProc::StartJob(&fi);
+	int retval = OsProc::StartJob(&fi, network_manager);
 
 #if defined(HAVE_EXT_LIBCGROUP)
 	if (cgroup != NULL)

@@ -28,7 +28,7 @@ endif()
 if(LINUX)
 	install(FILES nat_delete_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
 	install(FILES nat_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
-	condor_exe(network_namespace_tester "network_netlink_main.c;network_netlink.cpp;network_netfilter.c;network_manipulation.h" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
+	condor_exe(network_namespace_tester "network_netlink_main.c" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
 	condor_exe(ns_exec_tester "ns_exec.c" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
 endif()
 
