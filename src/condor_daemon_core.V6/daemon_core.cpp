@@ -1136,7 +1136,7 @@ DaemonCore::InfoCommandSinfulStringMyself(bool usePrivateAddress)
 						tmp);
 			}
 			else {
-				private_sinful_string.sprintf("<%s:%d>", private_ip.c_str(), port);
+				private_sinful_string = generate_sinful(private_ip.c_str(), port);
 				sinful_private = strdup(private_sinful_string.Value());
 			}
 			free(tmp);
@@ -2944,6 +2944,7 @@ DaemonCore::Verify(char const *command_descrip,DCpermission perm, const condor_s
 
 	if( reason ) {
 		char ipstr[IP_STRING_BUF_SIZE];
+		strcpy(ipstr, "(unknown)");
 		addr.to_ip_string(ipstr, sizeof(ipstr));
 	//sin_to_ipstring(sin,ipstr,IP_STRING_BUF_SIZE);
 
@@ -3021,7 +3022,6 @@ void DaemonCore::Driver()
 	int			i;
 	int			tmpErrno;
 	time_t		timeout;
-	int result;
 	time_t min_deadline;
 
 #ifndef WIN32
@@ -3521,11 +3521,11 @@ void DaemonCore::Driver()
 						recheck_status = true;
 						if ( (*pipeTable)[i].handler )
 							// a C handler
-							result = (*( (*pipeTable)[i].handler))( (*pipeTable)[i].service, pipe_end);
+							(*( (*pipeTable)[i].handler))( (*pipeTable)[i].service, pipe_end);
 						else
 						if ( (*pipeTable)[i].handlercpp )
 							// a C++ handler
-							result = ((*pipeTable)[i].service->*( (*pipeTable)[i].handlercpp))(pipe_end);
+							((*pipeTable)[i].service->*( (*pipeTable)[i].handlercpp))(pipe_end);
 						else
 						{
 							// no handler registered
@@ -4245,7 +4245,6 @@ int DaemonCore::HandleReq(Stream *insock, Stream* asock)
 	int					index;
 	int					reqFound = FALSE;
 	int					result = FALSE;
-	int					old_timeout;
     int                 perm         = USER_AUTH_FAILURE;
 	MyString            user;
     ClassAd *the_policy     = NULL;
@@ -4607,7 +4606,7 @@ int DaemonCore::HandleReq(Stream *insock, Stream* asock)
 
 	// read in the command from the sock with a timeout value of just 1 second,
 	// since we know there is already some data waiting for us.
-	old_timeout = sock->timeout(1);
+	sock->timeout(1);
 	result = sock->code(req);
 	// For now, lets set a 20 second timeout, so all command handlers are called with
 	// a timeout of 20 seconds on their socket.
@@ -7395,7 +7394,11 @@ int DaemonCore::Create_Process(
 		//  GCB's trickery if present.  As this address is
 		//  intended for my own children on the same machine,
 		//  this should be safe.
-	inheritbuf += InfoCommandSinfulStringMyself(true);
+	{
+		MyString mysin = InfoCommandSinfulStringMyself(true);
+		ASSERT(mysin.Length() > 0); // Empty entry means unparsable string.
+		inheritbuf += mysin;
+	}
 
 	if ( sock_inherit_list ) {
 		inherit_handles = TRUE;
@@ -8179,6 +8182,9 @@ int DaemonCore::Create_Process(
 		}
 	}
 #else
+	// Squash compiler warning about inherit_handles being set but not used on Linux
+	if (inherit_handles) {}
+
 	// START A NEW PROCESS ON UNIX
 
 		// We have to do some checks on the executable name and the
@@ -9320,10 +9326,6 @@ DaemonCore::InitDCCommandSocket( int command_port )
 		// is misconfigured [to preempt RUST like rust-admin #2915]
 
 	if( dc_rsock ) {
-			//const unsigned int my_ip = dc_rsock->get_ip_int();
-			//const unsigned int loopback_ip = ntohl( INADDR_LOOPBACK );
-
-			//if( my_ip == loopback_ip ) {
 		if ( dc_rsock->my_addr().is_loopback() ) {
 			dprintf( D_ALWAYS, "WARNING: Condor is running on the loopback address (127.0.0.1)\n" );
 			dprintf( D_ALWAYS, "         of this machine, and is not visible to other hosts!\n" );

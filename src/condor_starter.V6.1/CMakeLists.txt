@@ -28,6 +28,8 @@ endif()
 if(LINUX)
 	install(FILES nat_delete_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
 	install(FILES nat_script.sh DESTINATION "${C_LIBEXEC}" PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
+	condor_exe(network_namespace_tester "network_netlink_main.c;network_netlink.cpp;network_netfilter.c;network_manipulation.h" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
+	condor_exe(ns_exec_tester "ns_exec.c" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
 endif()
 
 # need to add all the other install targets for libexec.
@@ -36,9 +38,6 @@ install ( FILES scimark2lib.jar CondorJavaWrapper.class CondorJavaInfo.class DES
 if(LINUX AND WANT_GLEXEC)
 	install (FILES condor_glexec_setup condor_glexec_run condor_glexec_cleanup condor_glexec_kill condor_glexec_update_proxy DESTINATION ${C_LIBEXEC} PERMISSIONS ${CONDOR_SCRIPT_PERMS} )
 	condor_exe(condor_glexec_job_wrapper "glexec_job_wrapper.linux.cpp" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS};${KRB5_FOUND};${OPENSSL_FOUND};${PCRE_FOUND}" OFF)
-	condor_exe(network_namespace_tester "network_netlink_main.c;network_netlink.cpp;network_netfilter.c;network_manipulation.h" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
-	condor_exe(ns_exec_tester "ns_exec.c" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS}" OFF)
-	condor_exe( rsh "condor_rsh.cpp" ${C_LIBEXEC} "${CONDOR_TOOL_LIBS};${KRB5_FOUND};${OPENSSL_FOUND};${PCRE_FOUND}" OFF)
 endif()
 
 if (HAVE_SSH_TO_JOB)

@@ -1419,6 +1419,7 @@ dc_reconfig()
 			ptmp = NULL;
 			char segfault;	
 			segfault = *ptmp; // should blow up here
+			if (segfault) {} // Line to avoid compiler warnings.
 			ptmp[0] = 'a';
 			
 			// should never make it to here!
@@ -1535,67 +1536,12 @@ int dc_main( int argc, char** argv )
 	char**	ptr;
 	int		command_port = -1;
 	char const *daemon_sock_name = NULL;
-	int 	http_port = -1;
 	int		dcargs = 0;		// number of daemon core command-line args found
 	char	*ptmp, *ptmp1;
 	int		i;
 	int		wantsKill = FALSE, wantsQuiet = FALSE;
 	bool	done;
 
-#ifdef WIN32
-	// Scan our command line arguments for a "-f".  If we don't find a "-f",
-	// or a "-v", then we want to register as an NT Service.
-	i = 0;
-	done = false;
-	for( ptr = argv + 1; *ptr && (i < argc - 1); ptr++,i++)
-	{
-		if( ptr[0][0] != '-' ) {
-			break;
-		}
-		switch( ptr[0][1] ) {
-		case 'a':		// Append to the log file name.
-			ptr++;
-			break;
-		case 'b':		// run in Background (default)
-			break;
-		case 'c':		// specify directory where Config file lives
-			ptr++;
-			break;
-		case 'd':		// Dynamic local directories
-			break;
-		case 'f':		// run in Foreground
-			Foreground = 1;
-			break;
-		case 'l':		// specify Log directory
-			 ptr++;
-			 break;
-		case 'p':		// Use well-known Port for command socket.		
-			ptr++;		// Also used to specify a Pid file, but both
-			break;		// versions require a 2nd arg, so we're safe. 
-		case 'q':		// Quiet output
-			break;
-		case 'r':		// Run for <arg> minutes, then gracefully exit
-			ptr++;
-			break;
-		case 't':		// log to Terminal (stderr)
-			break;
-		case 'v':		// display Version info and exit
-			printf( "%s\n%s\n", CondorVersion(), CondorPlatform() );
-			exit(0);
-			break;
-		default:
-			done = true;
-			break;	
-		}
-		if( done ) {
-			break;		// break out of for loop
-		}
-	}
-	if ( (Foreground != 1) && get_mySubSystem()->isType(SUBSYSTEM_TYPE_MASTER) ) {
-		dc_main_init(-1,NULL);	// passing the master main_init a -1 will register as an NT service
-		return 1;
-	}
-#endif
 
 	condor_main_argc = argc;
 	condor_main_argv = (char **)malloc((argc+1)*sizeof(char *));
@@ -1816,14 +1762,8 @@ int dc_main( int argc, char** argv )
 					// specify an HTTP port
 				ptr++;
 				if( ptr && *ptr ) {
-					http_port = atoi( *ptr );
-					dcargs += 2;
-				} else {
 					fprintf( stderr, 
-							 "DaemonCore: ERROR: -http needs another argument.\n" );
-					fprintf( stderr, 
-					   "   Please specify the port to use for the HTTP socket.\n" );
-
+							 "DaemonCore: ERROR: -http no longer accepted.\n" );
 					exit( 1 );
 				}
 			} else {
@@ -2429,3 +2369,83 @@ int dc_main( int argc, char** argv )
 	EXCEPT("returned from Driver()");
 	return FALSE;
 }	
+
+// Parse argv enough to decide if we are starting as foreground or as background
+// We need this for windows because when starting as background, we need to actually
+// start via the Service Control Manager rather than calling dc_main directly.
+//
+bool dc_args_is_background(int argc, char** argv)
+{
+    bool Foreground = false; // default to background
+
+	// Scan our command line arguments for a "-f".  If we don't find a "-f",
+	// or a "-v", then we want to register as an NT Service.
+	int i = 0;
+	bool done = false;
+	for(char ** ptr = argv + 1; *ptr && (i < argc - 1); ptr++,i++)
+	{
+		if( ptr[0][0] != '-' ) {
+			break;
+		}
+		switch( ptr[0][1] ) {
+		case 'a':		// Append to the log file name.
+			ptr++;
+			break;
+		case 'b':		// run in Background (default)
+			Foreground = false;
+			break;
+		case 'c':		// specify directory where Config file lives
+			ptr++;
+			break;
+		case 'd':		// Dynamic local directories
+			break;
+		case 't':		// log to Terminal (stderr), implies -f
+		case 'f':		// run in Foreground
+			Foreground = true;
+			break;
+		case 'h':		// -http
+			if ( ptr[0][2] && ptr[0][2] == 't' ) {
+					// specify an HTTP port
+				ptr++;
+			} else {
+				done = true;
+			}
+            break;
+#ifndef WIN32
+		case 'k':		// Kill the pid in the given pid file
+			ptr++;
+			break;
+#endif
+		case 'l':		// specify Log directory
+			 ptr++;
+			 break;
+		case 'p':		// Use well-known Port for command socket.
+			ptr++;		// Also used to specify a Pid file, but both
+			break;		// versions require a 2nd arg, so we're safe. 
+		case 'q':		// Quiet output
+			break;
+		case 'r':		// Run for <arg> minutes, then gracefully exit
+			ptr++;
+			break;
+		case 's':       // the c-gahp uses -s, so for backward compatibility,
+						// do not allow abbreviations of -sock
+			if(0 == strcmp("-sock",*ptr)) {
+				ptr++;
+			} else {
+				done = true;
+			}
+			break;
+		case 'v':		// display Version info and exit
+			Foreground = true;
+			break;
+		default:
+			done = true;
+			break;	
+		}
+		if( done ) {
+			break;		// break out of for loop
+		}
+	}
+
+    return ! Foreground;
+}

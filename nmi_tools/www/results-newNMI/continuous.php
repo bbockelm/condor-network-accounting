@@ -432,7 +432,7 @@ function make_cell($run, $platform, $run_type, $td_class) {
     $failed_tasks = "<nobr>" . implode("</nobr><br><nobr>", $run["platforms"][$platform][$run_type]["bad-tasks"]) . "</nobr>";
   }
   else {
-    $failed_tasks = "<nobr>" . implode("<nobr><br></nobr>", array_slice($run["platforms"][$platform][$run_type]["bad-tasks"], 0, MAX_TASKS_TO_DISPLAY_IN_POPUP-1)) . "</nobr>";
+    $failed_tasks = "<nobr>" . implode("</nobr><br><nobr>", array_slice($run["platforms"][$platform][$run_type]["bad-tasks"], 0, MAX_TASKS_TO_DISPLAY_IN_POPUP-1)) . "</nobr>";
     $hidden = count($run["platforms"][$platform][$run_type]["bad-tasks"]) - MAX_TASKS_TO_DISPLAY_IN_POPUP;
     $failed_tasks .= "<br><i>$hidden more...</i>";
   }

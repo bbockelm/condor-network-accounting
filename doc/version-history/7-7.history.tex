@@ -30,8 +30,10 @@ The details of each version are described below.
 
 \begin{itemize}
 
-\item \Condor{q} \Opt{-run} now displays a job's EC2VirtualMachineName
-  under the HOST(s) column for running EC2 jobs.
+\item  \Condor{q} \Opt{-run} now displays the value of the job ClassAd
+attribute \Attr{EC2RemoteVirtualMachineName} instead of
+\Expr{[????????????????]},
+under the HOST(S) column for grid type ec2 jobs.
 \Ticket{2599}
 
 \end{itemize}
@@ -40,7 +42,14 @@ The details of each version are described below.
 
 \begin{itemize}
 
-\item None.
+\item The new configuration variable \Macro{JOB\_QUEUE\_LOG} 
+specifies an alternative path and file name for the \File{job\_queue.log} file.
+The default value is \File{\MacroUNI{SPOOL}/job\_queue.log}.
+This alternative location can be
+useful if there is a solid state drive which is big enough to hold the
+frequently written to \File{job\_queue.log},
+but not big enough to hold the whole contents of the spool directory.
+\Ticket{2598}
 
 \end{itemize}
 
@@ -48,7 +57,10 @@ The details of each version are described below.
 
 \begin{itemize}
 
-\item None.
+\item Communication errors were not always correctly handled when
+fetching results of a query when using the \Opt{-stream} option to
+\Condor{q}.  This problem was introduced in 7.7.0.
+\Ticket{2601}
 
 \end{itemize}
 
@@ -289,13 +301,21 @@ Its previous behavior had the \Condor{procd} continue to execute
 in a useless mode of operation, unable to receive any communication.
 \Ticket{2500}
 
-\item Lines like ``ProcAPI sanity failure on pid 1317, age = -1901476270''
-should no longer appear in the \Condor{master} daemon log on Mac OS X.
+\item For Mac OS X platforms, 
+improper detection of a non existent process led to lines such as
+\begin{verbatim}
+ProcAPI sanity failure on pid 1317, age = -1901476270
+\end{verbatim}
+appearing in the \Condor{master} daemon log.
+This should no longer be the case.
 \Ticket{2594}
 
-\item Added logic to the \Condor{negotiator} daemon's Accountant
-initialization to ensure that table entries are always created for
-accounting groups on startup and reconfig.
+\item Fixed a bug introduced with hierarchical group quotas that
+failed to correctly initialize table entries.
+The fix adds logic to the accounting mechanism in the
+\Condor{negotiator} daemon,
+such that initialization occurs correctly 
+when starting up and upon reconfiguration.
 \Ticket{2509}
 
 \item When \Condor{advertise} is used with the \Opt{-tcp} option, this
@@ -306,20 +326,22 @@ DaemonCore: Can't receive command request from IP (perhaps a timeout?)
 \end{verbatim}
 \Ticket{2483}
 
-\item \MacroNI{NETWORK\_INTERFACE} did not have any effect.  This bug
-was introduced in 7.7.0.
+\item Fixed a bug introduced in Condor version 7.7.0,
+in which the setting of \MacroNI{NETWORK\_INTERFACE} did not have any effect.
 \Ticket{2513}
 
 \item \Prog{glexec} now also works when Condor is running as root.
 \Ticket{2503}
 
-\item \Condor{master} now successfully advertises itself in a personal
-condor installation when the collector is configured to use port 0
+\item The \Condor{master} daemon now successfully advertises itself in 
+a Personal Condor installation,
+when the \Condor{collector} is configured to use port 0
 and to operate through a shared port.
 \Ticket{2555}
 
-\item Since 7.7.1, \MacroNI{WANT\_HOLD} did not work unless
-\MacroNI{WANT\_HOLD\_SUBCODE} was set to something non-zero.
+\item Since Condor version 7.7.1, 
+the configuration variable \Macro{WANT\_HOLD} did not work,
+unless \Macro{WANT\_HOLD\_SUBCODE} was set to a non-zero value.
 \Ticket{2565}
 
 \item Since Condor version 7.7.2, there was a rare condition that could cause
@@ -328,6 +350,11 @@ if the job was put on hold while it was running.
 In such cases, there was also a spurious
 unsuspend event logged in the job's user log.
 \Ticket{2577}
+
+\item Fixed a bug introduced in 7.7.2 by the change of \Macro{OpSys} to "WINDOWS".
+Submit files that used version 1 syntax for the \SubmitCmd{environment} command
+were using Unix syntax rather than Windows syntax.
+\Ticket{2607}
 
 \end{itemize}
 
