@@ -34,6 +34,8 @@
 #include "classad_helpers.h"
 #include "network_namespaces.h"
 
+#include <memory>
+
 #ifdef WIN32
 #include "executable_scripts.WINDOWS.h"
 extern dynuser* myDynuser;
@@ -244,19 +246,33 @@ VanillaProc::StartJob()
 	}
 #endif
 
-	NetworkNamespaceManager * network_manager = NULL;
+	std::auto_ptr<NetworkNamespaceManager> network_manager(NULL);
 	if (param_boolean("USE_NETWORK_NAMESPACES", false)) {
-		
+		std::string namespace_name("slot");
+		namespace_name += Starter->getMySlotNumber();
+		network_manager.reset(new NetworkNamespaceManager(namespace_name));
+		priv_state orig_priv = set_priv(PRIV_ROOT);
+		int rc = network_manager->CreateNamespace();
+		set_priv(orig_priv);
+		if (rc) {
+			dprintf(D_ALWAYS, "Failed to create network namespace - bailing.\n");
+			return FALSE;
+		}
 	}
 
 	// have OsProc start the job
 	//
-	int retval = OsProc::StartJob(&fi, network_manager);
+	int retval = OsProc::StartJob(&fi, network_manager.get());
 
 #if defined(HAVE_EXT_LIBCGROUP)
 	if (cgroup != NULL)
 		free(cgroup);
 #endif
+	if (network_manager.get()) {
+		priv_state orig_priv = set_priv(PRIV_ROOT);
+		int rc = network_manager->Cleanup();
+		set_priv(orig_priv);
+	}
 
 	return retval;
 }

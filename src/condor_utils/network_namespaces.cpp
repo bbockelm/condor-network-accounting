@@ -9,7 +9,7 @@
 #include "network_namespaces.h"
 #include "network_manipulation.h"
 
-NetworkNamespaceManager::NetworkNamespaceManager(std::string uniq_namespace) :
+NetworkNamespaceManager::NetworkNamespaceManager(std::string &uniq_namespace) :
 	m_state(UNCREATED), m_network_namespace(uniq_namespace),
 	m_internal_pipe("i_" + m_network_namespace), m_external_pipe("e_" + m_network_namespace),
 	m_sock(-1), m_created_pipe(false)
@@ -44,6 +44,7 @@ int NetworkNamespaceManager::CreateNamespace() {
 	args.AppendArg(namespace_script);
 	args.AppendArg(m_network_namespace);
 	args.AppendArg(m_external_pipe);
+	//dprintf(D_FULLDEBUG("NetworkNamespaceManager nat setup: %s %s %s\n", namespace_script, m_network_namespace, m_external_pipe);
 
 	FILE *fp = my_popen(args, "r", TRUE);
 	if (fp == NULL) {
@@ -74,13 +75,7 @@ int NetworkNamespaceManager::CreateNamespace() {
 }
 
 int NetworkNamespaceManager::CreateNetworkPipe() {
-	int rc, sock;
-        if ((sock = create_socket()) < 0) {
-                dprintf(D_ALWAYS, "Unable to create socket to talk to kernel.\n");
-                m_state = FAILED;
-                return -sock;
-        }
-	m_sock = sock;
+	int rc;
 
 	m_internal_pipe = "i_" + m_network_namespace;
         if ((rc = create_veth(m_sock, m_external_pipe.c_str(), m_internal_pipe.c_str()))) {
@@ -158,6 +153,9 @@ int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
 	if ((rc = set_netns(m_sock, m_internal_pipe.c_str(), pid))) {
 		dprintf(D_ALWAYS, "Failed to send %s to network namespace %d.\n", m_internal_pipe.c_str(), pid);
 	}
+
+	m_state = PASSED;
+
 	return rc;
 
 }

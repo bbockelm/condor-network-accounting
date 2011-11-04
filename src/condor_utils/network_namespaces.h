@@ -32,7 +32,7 @@ class NetworkNamespaceManager {
 
 public:
 
-	NetworkNamespaceManager(std::string uniq_namespace);
+	NetworkNamespaceManager(std::string &uniq_namespace);
 	int CreateNamespace();
 
 	/*

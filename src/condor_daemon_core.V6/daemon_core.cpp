@@ -42,6 +42,9 @@ void Generic_stop_logging();
 #include <sched.h>
 #include <sys/syscall.h>
 #include <sys/mount.h>
+#include <asm/ldt.h>
+#include <asm/prctl.h>
+#include <sys/prctl.h>
 
 static const char* MOUNT_PROC = "proc";
 static const char* MOUNT_SLASH_PROC = "/proc";
@@ -2744,9 +2747,11 @@ DaemonCore::reconfig(void) {
 		// If we are NOT the schedd, then do not use clone, as only
 		// the schedd benefits from clone, and clone is more susceptable
 		// to failures/bugs than fork.
+	/*
 	if ( !(get_mySubSystem()->isType(SUBSYSTEM_TYPE_SCHEDD)) ) {
 		m_use_clone_to_create_processes = false;
 	}
+	*/
 #endif /* HAVE CLONE */
 
 	m_invalidate_sessions_via_tcp = param_boolean("SEC_INVALIDATE_SESSIONS_VIA_TCP", true);
@@ -6616,6 +6621,9 @@ private:
 	char **m_unix_env;
 	size_t *m_core_hard_limit;
 	const int    *m_affinity_mask;
+#if HAVE_CLONE
+       unsigned long parent_fs_register;
+#endif
 	priv_state m_priv_state;
 	priv_state m_priv_state_parent;
 	Env m_envobject;
@@ -6744,17 +6752,36 @@ pid_t CreateProcessForkit::fork_exec() {
 
 		enterCreateProcessChild(m_errorpipe[1]);
 
-		int flags = (CLONE_VM|SIGCHLD);
+			// Muck around with the thread-local-storage
+			// By passing a zero'd-out TLS, we don't crash GDB.
+/*
+		if (syscall(SYS_arch_prctl,ARCH_GET_FS,&parent_fs_register)) {
+			dprintf(D_ALWAYS, "Unable to get parent TLS %s.\n", strerror(errno));
+		} else {
+			dprintf(D_ALWAYS, "Got parent register.\n");
+		}
+		struct user_desc tls;
+		memset((void*)&tls, 0, sizeof(user_desc));
+		tls.entry_number = -1;
+*/
+
+		int flags = (CLONE_VM|SIGCHLD/*|CLONE_SETTLS*/);
 
 		dprintf(D_ALWAYS, "About to clone.\n");
 		// We need a new FS namespace if we get a PID namespace to remount /proc
-		if (pid_ns)
+		if (pid_ns) {
 			flags |= CLONE_NEWPID|CLONE_NEWNS;
+		}
+		if (m_network_manager) {
+			flags |= CLONE_NEWNET;
+		}
 		newpid = clone(
 				CreateProcessForkit::clone_fn,
 				child_stack_ptr,
 				flags,
-				this );
+				this);/*,
+				NULL,
+				&tls );*/
 		int clone_errno = errno;
 
 		if (newpid > 0) {
@@ -6763,7 +6790,15 @@ pid_t CreateProcessForkit::fork_exec() {
 				kill(newpid, SIGKILL);
 				killed_child = true; // We'll print out this fact later on when it's safe to dprintf.
 			} else {
-				dprintf(D_ALWAYS, "Registration was a success for %d.\n", newpid);
+				dprintf(D_FULLDEBUG, "Registration was a success for %d.\n", newpid);
+				if (m_network_manager) {
+					if ((m_network_manager->PostCloneParent(newpid))) {
+						kill(newpid, SIGKILL);
+						dprintf(D_ALWAYS, "Failed to alter the child (%d) network namespace in post-clone of parent.\n", newpid);
+					} else {
+						dprintf(D_FULLDEBUG, "Post-clone network namespace operation in parent successful.\n");
+					}
+				}
 				write(m_syncpipe[1], "y", 1);
 			}
 		}
@@ -6861,7 +6896,7 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 			// we've already got this pid in our table! we've got
 			// to bail out immediately so our parent can retry.
 		int child_errno = DaemonCore::ERRNO_PID_COLLISION;
-		write(m_errorpipe[1], &child_errno, sizeof(child_errno));
+		//write(m_errorpipe[1], &child_errno, sizeof(child_errno));
 		return 4;
 	}
 		// If we made it here, we didn't find the PID in our
@@ -6902,7 +6937,7 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 						  PIDENVID_MAX );
 					// before we exit, make sure our parent knows something
 					// went wrong before the exec...
-				write(m_errorpipe[1], &errno, sizeof(errno));
+				//write(m_errorpipe[1], &errno, sizeof(errno));
 				return errno;
 			}
 
@@ -6926,7 +6961,7 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 					  "\"%s\" due to bad format. !\n", envid );
 				// before we exit, make sure our parent knows something
 				// went wrong before the exec...
-			write(m_errorpipe[1], &errno, sizeof(errno));
+			//write(m_errorpipe[1], &errno, sizeof(errno));
 			return errno;
 		}
 
@@ -6941,10 +6976,11 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 				  "Error.\n", envid );
 			// before we exit, make sure our parent knows something
 			// went wrong before the exec...
-		write(m_errorpipe[1], &errno, sizeof(errno));
+		//write(m_errorpipe[1], &errno, sizeof(errno));
 		return errno;
 	}
 		// END pid family environment id propogation
+	dprintf(D_FULLDEBUG, "Finished PID family environment ID prop.\n");
 
 		// check to see if this is a subfamily
 	if( ( m_family_info != NULL ) ) {
@@ -6961,14 +6997,14 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 							strerror(errno) );
 						// before we exit, make sure our parent knows something
 						// went wrong before the exec...
-					write(m_errorpipe[1], &errno, sizeof(errno));
+					//write(m_errorpipe[1], &errno, sizeof(errno));
 					return errno;
 				}
 		}
 
 		// regardless of whether or not we made an "official" unix
 		// process group above, ALWAYS contact the procd to register
-		// ourselves
+		// the child
 		//
 		ASSERT(daemonCore->m_proc_family != NULL);
 		if (daemonCore->m_proc_family->register_from_child()) {
@@ -7006,7 +7042,7 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 				                            m_family_info->glexec_proxy);
 			if (!ok) {
 				errno = DaemonCore::ERRNO_REGISTRATION_FAILED;
-				write(m_errorpipe[1], &errno, sizeof(errno));
+				//write(m_errorpipe[1], &errno, sizeof(errno));
 				return 4;
 			}
 
@@ -7042,6 +7078,17 @@ void CreateProcessForkit::exec() {
 		// with our parent (if it's been defined).
 	dprintf_init_fork_child();
 
+/*
+	unsigned long my_fs_register;
+	// Save our TLS area
+	if (syscall( SYS_arch_prctl, ARCH_GET_FS, &my_fs_register)) {
+		EXCEPT("Unable to retrieve my FS register\n");
+	}
+	// Restore the parent's TLS area
+	if (syscall( SYS_arch_prctl, ARCH_SET_FS, parent_fs_register)) {
+		EXCEPT("Unable to restore parent FS register\n");
+	}
+*/
 	pid_t pid = clone_safe_getpid();
 
 		// Wait until the parent informs us we can proceed.
@@ -7067,6 +7114,16 @@ void CreateProcessForkit::exec() {
 	}
 	dprintf(D_FULLDEBUG, "Child will attempt to exec based on parent response.\n");
 
+	if (m_network_manager) {
+		int net_rc;
+		if ((net_rc = m_network_manager->PostCloneChild())) {
+			dprintf(D_ALWAYS, "Failed to finish creating network namespace in child (rc=%d)\n", net_rc);
+			write(m_errorpipe[1], &net_rc, sizeof(net_rc));
+			_exit(net_rc);
+		} else {
+			dprintf(D_FULLDEBUG, "Child believes network namespace is completely configured.\n");
+		}
+	}
 
 		// If we made it here, we didn't find the PID in our
 		// table, so it's safe to continue and eventually do the
@@ -7350,9 +7407,16 @@ void CreateProcessForkit::exec() {
 		_exit(errno);
 	}
 
-	// Restore the privilege state; only needed if we are going to use NEWPID
-	if (m_priv_state != PRIV_UNKNOWN)
+/*
+	if (syscall(SYS_arch_prctl, ARCH_SET_FS, my_fs_register)) {
+		EXCEPT("Unable to restore my TLS!");
+	}
+*/
+
+		// Restore the privilege state; only needed if we are going to use NEWPID
+	if (m_priv_state != PRIV_UNKNOWN) {
 		set_priv_no_memory_changes(m_priv_state);
+	}
 
 		// now head into the proper priv state...
 	if ( m_priv != PRIV_UNKNOWN ) {
