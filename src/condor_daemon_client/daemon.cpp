@@ -27,7 +27,6 @@
 #include "daemon.h"
 #include "condor_string.h"
 #include "condor_attributes.h"
-#include "condor_parameters.h"
 #include "condor_adtypes.h"
 #include "condor_query.h"
 #include "get_daemon_name.h"
@@ -1649,9 +1648,6 @@ Daemon::getDefaultPort( void )
 	switch( _type ) {
 	case DT_COLLECTOR:
 		return COLLECTOR_PORT;
-		break;
-	case DT_NEGOTIATOR:
-		return NEGOTIATOR_PORT;
 		break;
 	case DT_VIEW_COLLECTOR:
 		return CONDOR_VIEW_PORT;
