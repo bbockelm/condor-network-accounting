@@ -35,6 +35,7 @@
 #include "network_namespaces.h"
 
 #include <memory>
+#include <sstream>
 
 #ifdef WIN32
 #include "executable_scripts.WINDOWS.h"
@@ -43,7 +44,7 @@ extern dynuser* myDynuser;
 
 extern CStarter *Starter;
 
-VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd)
+VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd), m_network_manager(NULL)
 {
 #if !defined(WIN32)
 	m_escalation_tid = -1;
@@ -246,13 +247,14 @@ VanillaProc::StartJob()
 	}
 #endif
 
-	std::auto_ptr<NetworkNamespaceManager> network_manager(NULL);
 	if (param_boolean("USE_NETWORK_NAMESPACES", false)) {
-		std::string namespace_name("slot");
-		namespace_name += Starter->getMySlotNumber();
-		network_manager.reset(new NetworkNamespaceManager(namespace_name));
+		std::stringstream namespace_name_ss;
+		namespace_name_ss << "slot";
+		namespace_name_ss << (Starter->getMySlotNumber());
+		std::string namespace_name = namespace_name_ss.str();
+		m_network_manager.reset(new NetworkNamespaceManager(namespace_name));
 		priv_state orig_priv = set_priv(PRIV_ROOT);
-		int rc = network_manager->CreateNamespace();
+		int rc = m_network_manager->CreateNamespace();
 		set_priv(orig_priv);
 		if (rc) {
 			dprintf(D_ALWAYS, "Failed to create network namespace - bailing.\n");
@@ -262,16 +264,17 @@ VanillaProc::StartJob()
 
 	// have OsProc start the job
 	//
-	int retval = OsProc::StartJob(&fi, network_manager.get());
+	int retval = OsProc::StartJob(&fi, m_network_manager.get());
 
 #if defined(HAVE_EXT_LIBCGROUP)
 	if (cgroup != NULL)
 		free(cgroup);
 #endif
-	if (network_manager.get()) {
+	if (!retval && m_network_manager.get()) {
 		priv_state orig_priv = set_priv(PRIV_ROOT);
-		int rc = network_manager->Cleanup();
+		int rc = m_network_manager->Cleanup();
 		set_priv(orig_priv);
+		dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
 	}
 
 	return retval;
@@ -348,6 +351,12 @@ VanillaProc::JobReaper(int pid, int status)
 		if (daemonCore->Get_Family_Usage(JobPid, m_final_usage) == FALSE) {
 			dprintf(D_ALWAYS, "error getting family usage for pid %d in "
 					"VanillaProc::JobReaper()\n", JobPid);
+		}
+		if (m_network_manager.get()) {
+			priv_state orig_priv = set_priv(PRIV_ROOT);
+			int rc = m_network_manager->Cleanup();
+			set_priv(orig_priv);
+			dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
 		}
 	}
 

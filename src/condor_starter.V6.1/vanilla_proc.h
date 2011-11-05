@@ -21,10 +21,13 @@
 #if !defined(_CONDOR_VANILLA_PROC_H)
 #define _CONDOR_VANILLA_PROC_H
 
+#include <memory>
+
 #include "os_proc.h"
 
 /* forward reference */
 class SafeSock;
+class NetworkNamespaceManager;
 
 /** The Vanilla-type job process class.  Uses procfamily to do its
 	dirty work.
@@ -74,6 +77,8 @@ private:
 #if !defined(WIN32)
 	int m_escalation_tid;
 #endif
+	std::auto_ptr<NetworkNamespaceManager> m_network_manager;
+
 };
 
 #endif

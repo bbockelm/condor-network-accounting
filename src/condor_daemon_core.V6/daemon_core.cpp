@@ -6765,7 +6765,7 @@ pid_t CreateProcessForkit::fork_exec() {
 		tls.entry_number = -1;
 */
 
-		int flags = (CLONE_VM|SIGCHLD/*|CLONE_SETTLS*/);
+		int flags = (/*CLONE_VM|*/SIGCHLD/*|CLONE_SETTLS*/);
 
 		dprintf(D_ALWAYS, "About to clone.\n");
 		// We need a new FS namespace if we get a PID namespace to remount /proc

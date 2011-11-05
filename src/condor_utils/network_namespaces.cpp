@@ -44,7 +44,7 @@ int NetworkNamespaceManager::CreateNamespace() {
 	args.AppendArg(namespace_script);
 	args.AppendArg(m_network_namespace);
 	args.AppendArg(m_external_pipe);
-	//dprintf(D_FULLDEBUG("NetworkNamespaceManager nat setup: %s %s %s\n", namespace_script, m_network_namespace, m_external_pipe);
+	dprintf(D_FULLDEBUG, "NetworkNamespaceManager nat setup: %s %s %s\n", namespace_script, m_network_namespace.c_str(), m_external_pipe.c_str());
 
 	FILE *fp = my_popen(args, "r", TRUE);
 	if (fp == NULL) {
@@ -92,11 +92,15 @@ int NetworkNamespaceManager::CreateNetworkPipe() {
 
 int NetworkNamespaceManager::PostCloneChild() {
 
+/*
+ * 	If we don't share memory, we can't rely on the state being correct here.
+ *
 	if (m_state != PASSED) {
 		dprintf(D_ALWAYS, "Called PostCloneChild before PostCloneParent; current state is %d.\n", m_state);
 		m_state = FAILED;
 		return 1;
 	}
+*/
 
 	// Manipulate our network configuration in the child.
 	// Notice that we open a new socket to the kernel - this is because the
