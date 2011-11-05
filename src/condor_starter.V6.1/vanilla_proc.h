@@ -78,6 +78,9 @@ private:
 	int m_escalation_tid;
 #endif
 	std::auto_ptr<NetworkNamespaceManager> m_network_manager;
+	bool m_cleanup_manager; // Hack alert: if we cleanup before we update the last ad, 
+				// network statistics are lost.  We turn this to true if 
+				// PublishUpdateAd should close the door on its way out.
 
 };
 

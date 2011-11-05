@@ -48,7 +48,7 @@ public:
 	 * Perform any network accounting for this namespace.
 	 * - classad: Reference to a classad to insert network accounting into.
 	 */
-	int PerformJobAccounting(classad::ClassAd & classad);
+	int PerformJobAccounting(classad::ClassAd *classad);
 
 	/*
 	 * Cleanup any persistent OS structures created by the manager.
@@ -59,6 +59,7 @@ private:
 
 	int CreateNetworkPipe();
 	int RunCleanupScript();
+	static int JobAccountingCallback(const unsigned char * rule_name, long long bytes, void * callback_data);
 
 	enum NAMESPACE_STATE {
 		UNCREATED,
@@ -75,6 +76,7 @@ private:
 	MyString m_internal_address_str;
 	int m_sock;
 	bool m_created_pipe;
+	classad::ClassAd m_statistics;
 
 };
 

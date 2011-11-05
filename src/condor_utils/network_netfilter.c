@@ -11,7 +11,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
 // Names are taken from libiptc.c
 static const char *hooknames[] = {
 	[NF_IP_PRE_ROUTING]      = "PREROUTING",
@@ -21,7 +20,7 @@ static const char *hooknames[] = {
 	[NF_IP_POST_ROUTING]     = "POSTROUTING",
 };
 
-static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const unsigned char *, long long) ) {
+static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const unsigned char *, long long, void *), void * callback_data) {
 
 	unsigned char *elems = entry->elems;
 	
@@ -31,7 +30,7 @@ static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const unsigned 
 	while (offset < entry->target_offset) {
 		match = (struct xt_entry_match *)(elems + offset);
 		if (strcmp(match->u.user.name, "comment") == 0) {
-			match_fcn(match->data, entry->counters.bcnt);
+			match_fcn(match->data, entry->counters.bcnt, callback_data);
 		}
 		size_t next_jump = match->u.match_size;
 		if (next_jump)
@@ -44,7 +43,7 @@ static int find_rules(struct ipt_entry * entry, int (*match_fcn)(const unsigned 
 	return 0;
 }
 
-int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char *, long long) ) {
+int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char *, long long, void *), void * callback_data) {
 	int sockfd;
 
 	if ((sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW)) < 0) {
@@ -102,8 +101,8 @@ int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char 
 		}
 
 		if ((chain_name == old_chain_name) && (strcmp((const char *)chain, (const char *)chain_name) == 0)) {
-			//fprintf(stderr, "Entry %d, offset %d, chain %s\n", idx, offset, chain_name);
-			find_rules(entry, match_fcn);
+			fprintf(stderr, "Entry %d, offset %d, chain %s\n", idx, offset, chain_name);
+			find_rules(entry, match_fcn, callback_data);
 
 		} else {
 			old_chain_name = chain_name;

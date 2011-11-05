@@ -357,7 +357,7 @@ int main(int argc, char * argv[]) {
 		goto finalize;
 	}
 
-	perform_accounting("JOBID", handle_match);
+	perform_accounting("JOBID", handle_match, NULL);
 
 finalize:
 	if (created) {

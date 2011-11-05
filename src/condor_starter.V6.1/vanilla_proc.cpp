@@ -44,7 +44,7 @@ extern dynuser* myDynuser;
 
 extern CStarter *Starter;
 
-VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd), m_network_manager(NULL)
+VanillaProc::VanillaProc(ClassAd* jobAd) : OsProc(jobAd), m_network_manager(NULL), m_cleanup_manager(false)
 {
 #if !defined(WIN32)
 	m_escalation_tid = -1;
@@ -330,6 +330,12 @@ VanillaProc::PublishUpdateAd( ClassAd* ad )
 		// Update our knowledge of how many processes the job has
 	num_pids = usage->num_procs;
 
+	if (m_network_manager.get()) {
+		priv_state orig_priv = set_priv(PRIV_ROOT);
+		m_network_manager->PerformJobAccounting(ad);
+		set_priv(orig_priv);
+	}
+
 		// Now, call our parent class's version
 	return OsProc::PublishUpdateAd( ad );
 }
@@ -354,9 +360,13 @@ VanillaProc::JobReaper(int pid, int status)
 		}
 		if (m_network_manager.get()) {
 			priv_state orig_priv = set_priv(PRIV_ROOT);
+			// Call this before removing the statistics; PublishUpdateAd is called after JobReaper
+			m_network_manager->PerformJobAccounting(NULL);
 			int rc = m_network_manager->Cleanup();
 			set_priv(orig_priv);
-			dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+			if (rc) {
+				dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+			}
 		}
 	}
 

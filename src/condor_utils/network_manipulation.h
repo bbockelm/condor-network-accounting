@@ -88,12 +88,13 @@ int set_netns(int sock, const char * eth, pid_t pid);
 
 /*
  * Read out the iptables from the kernel; each time there's a match, call the match_fcn.
- * - chain: Name of iptables chain to read out from the kernel
+ * - rule_name: Value of comment field associated with the rule.
  * - match_fcn: Function that is invoked for each rule in the chain that 
  *   performs accounting.  Invoked with the rule name and the number of bytes 
- *   that have passed the filter
+ *   that have passed the filter, and the provided callback data
+ * - callback_data: Opaque data provided to the callback
  */
-int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char *, long long) );
+int perform_accounting(const char * rule_name, int (*match_fcn)(const unsigned char *, long long, void *), void * callback_data);
 
 #ifdef __cplusplus
 } /* extern "C" */

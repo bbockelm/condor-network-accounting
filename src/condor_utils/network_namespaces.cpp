@@ -160,8 +160,33 @@ int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
 
 	m_state = PASSED;
 
+	// Advance automatically, as we don't currently have clone working with shared memory.
+	m_state = INTERNAL_CONFIGURED;
+
 	return rc;
 
+}
+
+int NetworkNamespaceManager::PerformJobAccounting(classad::ClassAd *classad) {
+	int rc = 0;
+	if (m_state == INTERNAL_CONFIGURED) {
+		dprintf(D_FULLDEBUG, "Polling netfilter for network statistics\n");
+		rc = perform_accounting(m_network_namespace.c_str(), JobAccountingCallback, (void *)&m_statistics);
+	}
+	if (classad) {
+		classad->Update(m_statistics);
+	}
+	return rc;
+}
+
+int NetworkNamespaceManager::JobAccountingCallback(const unsigned char * rule_name, long long bytes, void * callback_data) {
+	classad::ClassAd &classad = *(classad::ClassAd*)callback_data;
+	std::string attr_name("Network");
+	attr_name.append((const char *)rule_name);
+	classad.InsertAttr(attr_name, double(bytes), classad::Value::B_FACTOR);
+	dprintf(D_FULLDEBUG, "Network accounting: %s = %lld\n", attr_name.c_str(), bytes);
+	//classad.Assign(attr_name, bytes);
+	return 0;
 }
 
 int NetworkNamespaceManager::Cleanup() {
@@ -208,7 +233,7 @@ int NetworkNamespaceManager::RunCleanupScript() {
 
 	FILE *fp = my_popen(args, "r", TRUE);
 	if (fp == NULL) {
-		dprintf(D_ALWAYS, "NetworkNamespaceManager::CreateNamespace: "
+		dprintf(D_ALWAYS, "NetworkNamespaceManager::Cleanup : "
 			"my_popen failure on %s: (errno=%d) %s\n",
 			 args.GetArg(0), errno, strerror(errno));
 		m_state = FAILED;
@@ -220,7 +245,7 @@ int NetworkNamespaceManager::RunCleanupScript() {
 	int ret = my_pclose(fp);
 	str.trim();
 	if (ret) {
-		dprintf(D_ALWAYS, "NetworkNamespaceManager::CreateNamespace: %s "
+		dprintf(D_ALWAYS, "NetworkNamespaceManager::Cleanup : %s "
 			"exited with status %d and following output: %s\n",
 			args.GetArg(0), ret, str.Value());
 		m_state = FAILED;
