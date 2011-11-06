@@ -71,7 +71,7 @@ OsProc::~OsProc()
 
 
 int
-OsProc::StartJob(FamilyInfo* family_info, NetworkNamespaceManager * network_manager = NULL)
+OsProc::StartJob(FamilyInfo* family_info, NetworkNamespaceManager * network_manager = NULL, FilesystemRemap* fs_remap=NULL)
 {
 	int nice_inc = 0;
 	bool has_wrapper = false;
@@ -541,7 +541,8 @@ OsProc::StartJob(FamilyInfo* family_info, NetworkNamespaceManager * network_mana
                                              affinity_mask,
 											 NULL,
                                              &create_process_err_msg,
-                                             network_manager);
+                                             network_manager,
+					     fs_remap);
 	}
 
 	// Create_Process() saves the errno for us if it is an "interesting" error.

@@ -33,6 +33,8 @@
 #include "domain_tools.h"
 #include "classad_helpers.h"
 #include "network_namespaces.h"
+#include "filesystem_remap.h"
+#include "directory.h"
 
 #include <memory>
 #include <sstream>
@@ -195,6 +197,7 @@ VanillaProc::StartJob()
 		        fi.login);
 	}
 
+	FilesystemRemap * fs_remap = NULL;
 #if defined(LINUX)
 	// on Linux, we also have the ability to track processes via
 	// a phony supplementary group ID
@@ -247,6 +250,68 @@ VanillaProc::StartJob()
 	}
 #endif
 
+	// On Linux kernel 2.4.19 and later, we can give each job its
+	// own FS mounts.
+	char * mount_under_scratch = param("MOUNT_UNDER_SCRATCH");
+	if (mount_under_scratch) {
+ 		// It's very likely the 'condor' user doesn't have permission to stat some of these
+ 		// directories.  Switch to root for now.  We have to have the root priv to do this anyway
+ 		priv_state original_priv = set_root_priv();
+		if (get_priv() != PRIV_ROOT) {
+			dprintf(D_ALWAYS, "Unable to switch to root privileges; Condor must be run as root to use the MOUNT_UNDER_SCRATCH features.\n");
+			return FALSE;
+		}
+
+ 		std::string working_dir = Starter->GetWorkingDir();
+ 		if (IsDirectory(working_dir.c_str())) {
+			StringList mount_list(mount_under_scratch);
+			mount_list.rewind();
+			fs_remap = new FilesystemRemap();
+ 			char * next_dir;
+			while ( (next_dir=mount_list.next()) ) {
+				if (!*next_dir) {
+					// empty string?
+					mount_list.deleteCurrent();
+					continue;
+				}
+				std::string next_dir_str(next_dir);
+				// Gah, I wish I could throw an exception to clean up these nested if statements.
+				if (IsDirectory(next_dir)) {
+					char * full_dir = dirscat(working_dir, next_dir_str);
+					if (full_dir) {
+						std::string full_dir_str(full_dir);
+						delete [] full_dir; full_dir = NULL;
+						if (!mkdir_and_parents_if_needed( full_dir_str.c_str(), S_IRWXU, PRIV_USER )) {
+							dprintf(D_ALWAYS, "Failed to create scratch directory %s\n", full_dir_str.c_str());
+							return FALSE;
+						}
+						dprintf(D_FULLDEBUG, "Adding mapping: %s -> %s.\n", full_dir_str.c_str(), next_dir_str.c_str());
+						if (fs_remap->AddMapping(full_dir_str, next_dir_str)) {
+							// FilesystemRemap object prints out an error message for us.
+							return FALSE;
+						}
+					} else {
+						dprintf(D_ALWAYS, "Unable to concatenate %s and %s.\n", working_dir.c_str(), next_dir_str.c_str());
+						return FALSE;
+					}
+				} else {
+					dprintf(D_ALWAYS, "Unable to add mapping %s -> %s because %s doesn't exist.\n", working_dir.c_str(), next_dir, next_dir);
+ 				}
+				// Create mount.
+ 			}
+		} else {
+			dprintf(D_ALWAYS, "Unable to perform mappings because %s doesn't exist.\n", working_dir.c_str());
+			return FALSE;
+ 		}
+		// Long term, we'd like to squash $(EXECUTE) to prevent a job from poking
+		// around inside other job's sandboxes.  However, to do this, we'd need to
+		// rewrite the environment, the job ad, and the machine ad.  Don't know where
+		// this hooks in yet.
+		//
+		// TODO: This misses the return FALSE codepath above.
+ 		set_priv(original_priv);
+	}
+
 	if (param_boolean("USE_NETWORK_NAMESPACES", false)) {
 		std::stringstream namespace_name_ss;
 		namespace_name_ss << "slot";
@@ -264,7 +329,7 @@ VanillaProc::StartJob()
 
 	// have OsProc start the job
 	//
-	int retval = OsProc::StartJob(&fi, m_network_manager.get());
+	int retval = OsProc::StartJob(&fi, m_network_manager.get(), fs_remap);
 
 #if defined(HAVE_EXT_LIBCGROUP)
 	if (cgroup != NULL)
@@ -275,6 +340,9 @@ VanillaProc::StartJob()
 		int rc = m_network_manager->Cleanup();
 		set_priv(orig_priv);
 		dprintf(D_ALWAYS, "Failed to cleanup network namespace (rc=%d)\n", rc);
+	}
+	if (fs_remap) {
+		delete fs_remap;
 	}
 
 	return retval;

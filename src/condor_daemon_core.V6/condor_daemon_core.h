@@ -61,6 +61,7 @@
 #include "condor_sockaddr.h"
 #include "generic_stats.h"
 #include "network_namespaces.h"
+#include "filesystem_remap.h"
 
 #include "../condor_procd/proc_family_io.h"
 class ProcFamilyInterface;
@@ -1131,7 +1132,8 @@ class DaemonCore : public Service
 		int			  *affinity_mask	   = NULL,
 		char const    *daemon_sock         = NULL,
         MyString      *err_return_msg      = NULL,
-	NetworkNamespaceManager * network_mgr = NULL
+	NetworkNamespaceManager * network_mgr = NULL,
+	FilesystemRemap *remap             = NULL
         );
 
     //@}

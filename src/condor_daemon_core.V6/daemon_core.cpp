@@ -6547,7 +6547,8 @@ public:
 		size_t *core_hard_limit,
 		int		*affinity_mask,
 		bool want_pid_namespace,
-		NetworkNamespaceManager * network_manager
+		NetworkNamespaceManager * network_manager,
+		FilesystemRemap *fs_remap
 	): m_errorpipe(the_errorpipe), m_args(the_args),
 	   m_job_opt_mask(the_job_opt_mask), m_env(the_env),
 	   m_inheritbuf(the_inheritbuf),
@@ -6566,7 +6567,8 @@ public:
 	   m_priv_state(PRIV_UNKNOWN),
 	   m_priv_state_parent(PRIV_UNKNOWN),
 	   m_want_pid_namespace(want_pid_namespace),
-	   m_network_manager(network_manager)
+	   m_network_manager(network_manager),
+	   m_fs_remap(fs_remap)
 	{
 	}
 
@@ -6629,6 +6631,7 @@ private:
 	Env m_envobject;
 	const bool m_want_pid_namespace;
 	NetworkNamespaceManager * m_network_manager;
+	FilesystemRemap *m_fs_remap;
 };
 
 enum {
@@ -6703,6 +6706,7 @@ pid_t CreateProcessForkit::fork_exec() {
 		fds[0].fd = m_errorpipe[0];
 		fds[0].events = POLLIN;
 		bool pid_ns = false;
+		bool mount_ns = false;
 		bool killed_child = false;
 		// Both PID and FS namespaces require PRIV_ROOT
 		if (m_want_pid_namespace) {
@@ -6712,6 +6716,7 @@ pid_t CreateProcessForkit::fork_exec() {
 			}
 			if (get_priv_state() == PRIV_ROOT) {
 				pid_ns = m_want_pid_namespace;
+				mount_ns = m_fs_remap ? true : false;
 			} else {
 				m_priv_state = PRIV_UNKNOWN;
 				m_priv_state_parent = PRIV_UNKNOWN;
@@ -6775,6 +6780,9 @@ pid_t CreateProcessForkit::fork_exec() {
 		if (m_network_manager) {
 			flags |= CLONE_NEWNET;
 		}
+		if (mount_ns) {
+			flags |= CLONE_FS;
+		}
 		newpid = clone(
 				CreateProcessForkit::clone_fn,
 				child_stack_ptr,
@@ -6834,6 +6842,10 @@ pid_t CreateProcessForkit::fork_exec() {
 
 		if (m_priv_state_parent != PRIV_UNKNOWN)
 			set_priv(m_priv_state_parent);
+
+		if (m_fs_remap) {
+			set_priv(m_priv_state);
+		}
 
 		return newpid;
 	}
@@ -6895,7 +6907,7 @@ int CreateProcessForkit::child_registration(pid_t pid, pid_t ppid, bool parent=f
 	if( (daemonCore->pidTable->lookup(pid, pidinfo) >= 0) ) {
 			// we've already got this pid in our table! we've got
 			// to bail out immediately so our parent can retry.
-		int child_errno = DaemonCore::ERRNO_PID_COLLISION;
+		//int child_errno = DaemonCore::ERRNO_PID_COLLISION;
 		//write(m_errorpipe[1], &child_errno, sizeof(child_errno));
 		return 4;
 	}
@@ -7290,6 +7302,10 @@ void CreateProcessForkit::exec() {
 			}
 		}
 	}
+	if (m_fs_remap && m_fs_remap->PerformMappings()) {
+		write(m_errorpipe[1], &errno, sizeof(errno));
+		_exit(errno);
+	}
 
 
 		/* Re-nice ourself */
@@ -7521,7 +7537,8 @@ int DaemonCore::Create_Process(
 			int			  *affinity_mask,
 			char const    *daemon_sock,
 			MyString      *err_return_msg,
-			NetworkNamespaceManager * network_manager
+			NetworkNamespaceManager * network_manager,
+			FilesystemRemap * remap
             )
 {
 	int i, j;
@@ -7530,6 +7547,9 @@ int DaemonCore::Create_Process(
 	int numInheritFds = 0;
 	MyString executable_buf;
 	priv_state current_priv = PRIV_UNKNOWN;
+
+	// Remap our executable and CWD if necessary.
+	std::string alt_executable_fullpath, alt_cwd;
 
 	// For automagic DC std pipes.
 	int dc_pipe_fds[3][2] = {{-1, -1}, {-1, -1}, {-1, -1}};
@@ -8524,6 +8544,15 @@ int DaemonCore::Create_Process(
 		}
 	}
 
+	if (remap) {
+		alt_executable_fullpath = remap->RemapFile(executable_fullpath);
+		alt_cwd = remap->RemapDir(cwd);
+		if (alt_executable_fullpath.compare(executable_fullpath))
+			dprintf(D_ALWAYS, "Remapped file: %s\n", alt_executable_fullpath.c_str());
+		if (alt_cwd.compare(cwd))
+			dprintf(D_ALWAYS, "Remapped cwd: %s\n", alt_cwd.c_str());
+	}
+
 	{
 			// Create a "forkit" object to hold all the state that we need in the child.
 			// In some cases, the "fork" will actually be a clone() operation, which
@@ -8540,9 +8569,9 @@ int DaemonCore::Create_Process(
 			time_of_fork,
 			mii,
 			family_info,
-			cwd,
+			alt_cwd.length() ? alt_cwd.c_str() : cwd,
 			executable,
-			executable_fullpath,
+			alt_executable_fullpath.length() ? alt_executable_fullpath.c_str() : executable_fullpath,
 			std,
 			numInheritFds,
 			inheritFds,
@@ -8553,7 +8582,8 @@ int DaemonCore::Create_Process(
 			core_hard_limit,
 			affinity_mask,
 			family_info ? family_info->want_pid_namespace : false,
-			network_manager);
+			network_manager,
+			remap);
 
 		newpid = forkit.fork_exec();
 	}
