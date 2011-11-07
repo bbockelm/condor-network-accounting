@@ -6781,7 +6781,7 @@ pid_t CreateProcessForkit::fork_exec() {
 			flags |= CLONE_NEWNET;
 		}
 		if (mount_ns) {
-			flags |= CLONE_FS;
+			flags |= CLONE_NEWNS;
 		}
 		newpid = clone(
 				CreateProcessForkit::clone_fn,
@@ -6837,7 +6837,7 @@ pid_t CreateProcessForkit::fork_exec() {
 		}
 
 		if ((newpid == -1) && (clone_errno == EINVAL)) {
-			dprintf(D_ALWAYS, "PID namespaces not supported in this kernel.");
+			dprintf(D_ALWAYS, "PID namespaces not supported in this kernel.\n");
 		}
 
 		if (m_priv_state_parent != PRIV_UNKNOWN)
