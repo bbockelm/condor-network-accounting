@@ -277,17 +277,17 @@ VanillaProc::StartJob()
 		}
 		dprintf(D_FULLDEBUG, "Will attempt to set the chroot to %s.\n", requested_root_dir.c_str());
 
-		std::string working_dir = Starter->GetWorkingDir();
-		const char * full_dir = dirscat(requested_root_dir, working_dir);
+		std::string execute_dir(Starter->GetExecuteDir());
+		const char * full_dir = dirscat(requested_root_dir, execute_dir);
 		std::string full_dir_str;
 		if (full_dir) {
 			full_dir_str = full_dir;
 		} else {
-			dprintf(D_ALWAYS, "Unable to concatenate %s and %s.\n", requested_root_dir.c_str(), working_dir.c_str());
+			dprintf(D_ALWAYS, "Unable to concatenate %s and %s.\n", requested_root_dir.c_str(), execute_dir.c_str());
 			return FALSE;
 		}
 		delete [] full_dir;
-		if (IsDirectory(working_dir.c_str())) {
+		if (IsDirectory(execute_dir.c_str())) {
 			if (!mkdir_and_parents_if_needed( full_dir_str.c_str(), S_IRWXU, PRIV_USER )) {
 				dprintf(D_ALWAYS, "Failed to create scratch directory %s\n", full_dir_str.c_str());
 				return FALSE;
@@ -295,8 +295,8 @@ VanillaProc::StartJob()
 			if (!fs_remap) {
 				fs_remap = new FilesystemRemap();
 			}
-			dprintf(D_FULLDEBUG, "Adding mapping: %s -> %s.\n", working_dir.c_str(), full_dir_str.c_str());
-			if (fs_remap->AddMapping(working_dir, full_dir_str)) {
+			dprintf(D_FULLDEBUG, "Adding mapping: %s -> %s.\n", execute_dir.c_str(), full_dir_str.c_str());
+			if (fs_remap->AddMapping(execute_dir, full_dir_str)) {
 				// FilesystemRemap object prints out an error message for us.
 				return FALSE;
 			}
@@ -306,7 +306,7 @@ VanillaProc::StartJob()
 				return FALSE;
 			}
 		} else {
-			dprintf(D_ALWAYS, "Unable to do chroot because working dir %s does not exist.\n", working_dir.c_str());
+			dprintf(D_ALWAYS, "Unable to do chroot because working dir %s does not exist.\n", execute_dir.c_str());
 		}
 	} else {
 		dprintf(D_ALWAYS, "Value of RootDir is unset.\n");
