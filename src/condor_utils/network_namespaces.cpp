@@ -145,6 +145,7 @@ int NetworkNamespaceManager::PostCloneChild() {
 	// This is why we saved the IPv4 address in m_internal_address_str instead of just
 	// recreating it from m_internal_address
 	int sock;
+	dprintf(D_FULLDEBUG, "Child proceeding to configure networking for address %s.\n", m_internal_address_str.Value());
 	if ((sock = create_socket()) < 0) {
 		dprintf(D_ALWAYS, "Unable to create socket to talk to kernel for child.\n");
 		rc = 1;
@@ -200,7 +201,8 @@ int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
 			// No log: the normal error-fighting mechanisms will log something.
 			return 1;
 		} else  {
-			dprintf(D_ALWAYS, "Error reading from child: %s (errno=%d).\n", strerror(errno), errno);
+			dprintf(D_ALWAYS, "Error reading from child fd %d: %s (errno=%d).\n", m_c2p[0], strerror(errno), errno);
+			return errno;
 		}
 	}
 	if (rc != 0) {
@@ -234,9 +236,9 @@ int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
 
 	// Wait until the child's exec or error.
 	if (rc == 0) {
-		while (((rc2 = read(m_c2p[1], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
-		if (rc2 != -1) {
-			dprintf(D_ALWAYS, "Got error code from child: %d", rc);
+		while (((rc2 = read(m_c2p[0], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+		if (rc2 > 0) {
+			dprintf(D_ALWAYS, "Got error code from child: %d\n", rc);
 		} else if (errno != EPIPE) {
 			dprintf(D_ALWAYS, "Error reading from child: %s (errno=%d).\n", strerror(errno), errno);
 			rc = errno;

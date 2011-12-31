@@ -6664,6 +6664,13 @@ pid_t CreateProcessForkit::clone_safe_getppid() {
 
 pid_t CreateProcessForkit::fork_exec() {
 	pid_t newpid;
+	priv_state tmp_priv_state;
+
+	// The network manager has special synchronization, regardless of clone or fork.
+	if (m_network_manager && m_network_manager->PreClone()) {
+		dprintf(D_ALWAYS, "Preparation for clone failed in the network manager.\n");
+		return -1;
+	}
 
 #if HAVE_CLONE
 		// Why use clone() instead of fork?  In current versions of
@@ -6685,11 +6692,6 @@ pid_t CreateProcessForkit::fork_exec() {
 		                    "to create child process.\n");
 
 		bool killed_child = false;
-
-		if (m_network_manager && m_network_manager->PreClone()) {
-			dprintf(D_ALWAYS, "Preparation for clone failed in the network manager.\n");
-			return -1;
-		}
 
 			// The stack size must be big enough for everything that
 			// happens in CreateProcessForkit::clone_fn().  In some
@@ -6729,12 +6731,15 @@ pid_t CreateProcessForkit::fork_exec() {
 			this );
 
 		if (m_network_manager) {
+			// Always call PostClone*, even if priv state can't change.
+			tmp_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
 			if ((m_network_manager->PostCloneParent(newpid))) {
 				kill(newpid, SIGKILL);
 				dprintf(D_ALWAYS, "Failed to alter the child (%d) network namespace in post-clone of parent.\n", newpid);
 			} else {
 				dprintf(D_FULLDEBUG, "Post-clone network namespace operation in parent successful.\n");
 			}
+			set_priv_no_memory_changes(tmp_priv_state);
 		}
 
 		exitCreateProcessChild();
@@ -6755,6 +6760,17 @@ pid_t CreateProcessForkit::fork_exec() {
 			// in child
 		enterCreateProcessChild(this);
 		exec(); // never returns
+	}
+
+	if (m_network_manager) {
+		tmp_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
+		if ((m_network_manager->PostCloneParent(newpid))) {
+			kill(newpid, SIGKILL);
+			dprintf(D_ALWAYS, "Failed to alter the child (%d) network namespace in post-clone of parent.\n", newpid);
+		} else {
+			dprintf(D_FULLDEBUG, "Post-clone network namespace operation in parent successful.\n");
+		}
+		set_priv_no_memory_changes(tmp_priv_state);
 	}
 
 	return newpid;

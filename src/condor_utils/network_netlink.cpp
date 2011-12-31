@@ -409,7 +409,8 @@ int add_default_route(int sock, const char * gw) {
 
 	iov[1].iov_base = &rtmsg;
 	iov[1].iov_len = NLMSG_ALIGN(sizeof(struct rtmsg)); // Note: not sure if there's a better alignment here
-	struct rtattr rta2; memset(&rta2, 0, sizeof(struct rtmsg));
+
+	struct rtattr rta2; memset(&rta2, 0, sizeof(struct rtattr));
 	rta2.rta_type = RTA_GATEWAY;
 	rta2.rta_len = RTA_LENGTH(INET_LEN);
 
