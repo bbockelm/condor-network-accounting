@@ -230,7 +230,9 @@ int main(int argc, char *argv[])
 	procname = basename(argv[0]);
 
 	memset(myttyname, '\0', sizeof(myttyname));
-	readlink("/proc/self/fd/0", myttyname, sizeof(myttyname));
+	if (readlink("/proc/self/fd/0", myttyname, sizeof(myttyname)) < 0) {
+		printf("Failed to read /proc/self/fd/0\n");
+	}
 
 	while ((c = getopt(argc, argv, "+mguUiphcnf:P:")) != EOF) {
 		switch (c) {
@@ -306,7 +308,9 @@ int main(int argc, char *argv[])
 		char buf[20];
 		snprintf(buf, 20, "%d", pid);
 		close(pipefd[0]);
-		write(pipefd[1], buf, strlen(buf)+1);
+		if (write(pipefd[1], buf, strlen(buf)+1) < 0) {
+			printf("Failed to write into pipe: %d, %s\n", errno, strerror(errno));
+		}
 		close(pipefd[1]);
 	}
 

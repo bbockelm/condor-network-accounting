@@ -36,11 +36,12 @@ public:
 	int CreateNamespace();
 
 	/*
-	 * Functions to invoke after child has been created with clone.
-	 * PostCloneParent must first be called, followed by PostCloneChild,
-	 * in a race-free fashion.
+	 * Functions to invoke for creating the child namespace
+	 * These synchronize internally, but the parent and child
+	 * must be overlapping.
 	 * - pid: the PID of the child process.
 	 */
+	int PreClone();
 	int PostCloneParent(pid_t pid);
 	int PostCloneChild();
 
@@ -78,6 +79,8 @@ private:
 	bool m_created_pipe;
 	classad::ClassAd m_statistics;
 
+	// Synchronization pipes.
+	int m_p2c[2], m_c2p[2];
 };
 
 #endif

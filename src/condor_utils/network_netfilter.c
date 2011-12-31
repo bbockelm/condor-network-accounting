@@ -101,7 +101,7 @@ int perform_accounting(const char * chain, int (*match_fcn)(const unsigned char 
 		}
 
 		if ((chain_name == old_chain_name) && (strcmp((const char *)chain, (const char *)chain_name) == 0)) {
-			fprintf(stderr, "Entry %d, offset %d, chain %s\n", idx, offset, chain_name);
+			fprintf(stderr, "Entry %ld, offset %ld, chain %s\n", idx, offset, chain_name);
 			find_rules(entry, match_fcn, callback_data);
 
 		} else {

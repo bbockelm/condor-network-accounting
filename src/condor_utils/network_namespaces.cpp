@@ -90,18 +90,53 @@ int NetworkNamespaceManager::CreateNetworkPipe() {
 	return 0;
 }
 
+int NetworkNamespaceManager::PreClone() {
+	if ((pipe(m_p2c) < 0) || (pipe(m_c2p) < 0)) {
+		dprintf(D_ALWAYS, "NetworkNamespaceManager: pipe() failed with %s (errno=%d).\n", strerror(errno), errno);
+		return -1;
+	}
+	if ((fcntl(m_p2c[0], F_SETFD, FD_CLOEXEC) < 0) || (fcntl(m_c2p[1], F_SETFD, FD_CLOEXEC) < 0)) {
+		dprintf(D_ALWAYS, "NetworkNamespaceManager: fcntl() failed with %s (errno=%d).\n", strerror(errno), errno);
+		return -1;
+	}
+	return 0;
+}
+
 int NetworkNamespaceManager::PostCloneChild() {
 
-/*
- * 	If we don't share memory, we can't rely on the state being correct here.
- *
-	if (m_state != PASSED) {
-		dprintf(D_ALWAYS, "Called PostCloneChild before PostCloneParent; current state is %d.\n", m_state);
-		m_state = FAILED;
-		return 1;
-	}
-*/
+	// Close the end of the pipes that aren't ours
+	close(m_p2c[1]);
+	close(m_c2p[0]);
 
+	// Call unshare, and tell the parent to proceed.
+	// If there's an error, simply return non-zero; the parent will get an EPIPE.
+	int rc, rc2;
+
+	rc = ::unshare(CLONE_NEWNET);
+	if (rc) {
+		dprintf(D_ALWAYS, "Failed to unshare the network namespace\n");
+		return errno;
+	}
+
+	while (((rc2 = write(m_c2p[1], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+	if (rc2 < 0) {
+		dprintf(D_ALWAYS, "Error communicating with child: %s (errno=%d).\n", strerror(errno), errno);
+		return errno;
+	}
+
+
+	// Wait until the parent indicates it's OK to proceed
+	while (((rc2 = read(m_p2c[0], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+	if (rc2 == -1) {
+		dprintf(D_ALWAYS, "Error reading from parent: %s (errno=%d).\n", strerror(errno), errno);
+		return errno;
+	}
+	if (rc != 0) {
+		dprintf(D_ALWAYS, "Got an error from the parent: %d.\n", rc);
+		return rc;
+	}
+
+        //
 	// Manipulate our network configuration in the child.
 	// Notice that we open a new socket to the kernel - this is because the
 	// other socket still talks to the original namespace.
@@ -109,7 +144,7 @@ int NetworkNamespaceManager::PostCloneChild() {
 	// Note: Because we may be in a shared-memory clone, do NOT modify the heap.
 	// This is why we saved the IPv4 address in m_internal_address_str instead of just
 	// recreating it from m_internal_address
-	int sock, rc = 0;
+	int sock;
 	if ((sock = create_socket()) < 0) {
 		dprintf(D_ALWAYS, "Unable to create socket to talk to kernel for child.\n");
 		rc = 1;
@@ -138,6 +173,12 @@ int NetworkNamespaceManager::PostCloneChild() {
 
 	m_state = INTERNAL_CONFIGURED;
 
+	// Note we don't write anything to the parent, on success or failure.
+	// This is because the parent must wait until the child exits, and the fact
+	// m_c2p[1] is marked FD_CLOEXEC will cause an EPIPE to be recieved by the parent,
+	// the sign of success.
+	// The "normal" Create_Process communication pipe takes care of the error case.
+
 finalize_child:
 	close(sock);
 failed_socket:
@@ -147,21 +188,60 @@ failed_socket:
 
 int NetworkNamespaceManager::PostCloneParent(pid_t pid) {
 
+        // Close the end of the pipes that aren't ours
+	close(m_p2c[0]);
+	close(m_c2p[1]);
+
+	// Wait for the child to indicate we can proceed (child must call unshare())
+	int rc2, rc=0;
+	while (((rc2 = read(m_c2p[0], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+	if (rc2 == -1) {
+		if (errno == EPIPE) {
+			// No log: the normal error-fighting mechanisms will log something.
+			return 1;
+		} else  {
+			dprintf(D_ALWAYS, "Error reading from child: %s (errno=%d).\n", strerror(errno), errno);
+		}
+	}
+	if (rc != 0) {
+		dprintf(D_ALWAYS, "Got an error from the child: %d.\n", rc);
+		return rc;
+	}
+
 	if (m_state != CREATED) {
 		dprintf(D_ALWAYS, "NetworkNamespaceManager in incorrect state %d to send device to internal namespace\n", m_state);
 		m_state = FAILED;
 		return 1;
 	}
 	
-	int rc;
 	if ((rc = set_netns(m_sock, m_internal_pipe.c_str(), pid))) {
 		dprintf(D_ALWAYS, "Failed to send %s to network namespace %d.\n", m_internal_pipe.c_str(), pid);
 	}
 
 	m_state = PASSED;
 
-	// Advance automatically, as we don't currently have clone working with shared memory.
+	// Advance automatically, in case we didn't use clone.
 	m_state = INTERNAL_CONFIGURED;
+
+	// Inform the child it can advance.
+	if (rc == 0) {
+		while (((rc2 = write(m_p2c[1], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+		if (rc2 < 0) {
+			dprintf(D_ALWAYS, "Error communicating with child: %s (errno=%d).\n", strerror(errno), errno);
+			rc = rc2;
+		}
+	}
+
+	// Wait until the child's exec or error.
+	if (rc == 0) {
+		while (((rc2 = read(m_c2p[1], &rc, sizeof(rc))) < 0) && (errno == EINTR)) {}
+		if (rc2 != -1) {
+			dprintf(D_ALWAYS, "Got error code from child: %d", rc);
+		} else if (errno != EPIPE) {
+			dprintf(D_ALWAYS, "Error reading from child: %s (errno=%d).\n", strerror(errno), errno);
+			rc = errno;
+		}
+	}
 
 	return rc;
 

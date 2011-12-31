@@ -34,10 +34,6 @@
 #if HAVE_CLONE
 #include <sched.h>
 #include <sys/syscall.h>
-#include <sys/mount.h>
-
-static const char* MOUNT_PROC = "proc";
-static const char* MOUNT_SLASH_PROC = "/proc";
 #endif
 
 #if HAVE_RESOLV_H && HAVE_DECL_RES_INIT
@@ -6691,7 +6687,7 @@ pid_t CreateProcessForkit::fork_exec() {
 		bool killed_child = false;
 
 		if (m_network_manager && m_network_manager->PreClone()) {
-			dprintf("Preparation for clone failed in the network manager.\n");
+			dprintf(D_ALWAYS, "Preparation for clone failed in the network manager.\n");
 			return -1;
 		}
 
@@ -7102,13 +7098,17 @@ void CreateProcessForkit::exec() {
 
 	if (m_network_manager) {
 		int net_rc;
+		// Note we call PostCloneChild *regardless* of whether we can actually set the root privs.
+		// This is because PostCloneChild contains necessary synchronization primitives.
+		m_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
 		if ((net_rc = m_network_manager->PostCloneChild())) {
 			dprintf(D_ALWAYS, "Failed to finish creating network namespace in child (rc=%d)\n", net_rc);
-			write(m_errorpipe[1], &net_rc, sizeof(net_rc));
-			_exit(net_rc);
+			writeExecError(net_rc);
+			_exit(4);
 		} else {
 			dprintf(D_FULLDEBUG, "Child believes network namespace is completely configured.\n");
 		}
+		set_priv_no_memory_changes( m_priv_state );
 	}
 
 
@@ -7208,29 +7208,17 @@ void CreateProcessForkit::exec() {
 
 	// This requires rootly power
 	if (m_fs_remap) {
-		int ret = 0;
 		if (can_switch_ids()) {
 			m_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
 #ifdef HAVE_UNSHARE
 			int rc = ::unshare(CLONE_NEWNS|CLONE_FS);
 			if (rc) {
 				dprintf(D_ALWAYS, "Failed to unshare the mount namespace\n");
-				ret = write(m_errorpipe[1], &errno, sizeof(errno));
-				if (ret < 1) {
-					_exit(errno);
-				} else {
-					_exit(errno);
-				}
+				writeExecError(errno);
 			}
 #else
 			dprintf(D_ALWAYS, "Can not remount filesystems because this system does not have unshare(2)\n");
-			errno = ENOSYS;
-			ret = write(m_errorpipe[1], &errno, sizeof(errno));
-			if (ret < 1) {
-				_exit(errno);
-			} else {
-				_exit(errno);
-			}
+			writeExecError(errno);
 #endif
 		} else {
 			dprintf(D_ALWAYS, "Not remapping FS as requested, due to lack of privileges.\n");
@@ -7239,12 +7227,7 @@ void CreateProcessForkit::exec() {
 	}
 
 	if (m_fs_remap && m_fs_remap->PerformMappings()) {
-		int ret = write(m_errorpipe[1], &errno, sizeof(errno));
-		if (ret < 1) {
-			_exit(errno);
-		} else {
-			_exit(errno);
-		}
+		writeExecError(errno);
 	}
 
 	// And back to normal userness
@@ -8697,8 +8680,6 @@ int DaemonCore::Create_Process(
 		goto wrapup;
 	}
 #endif
-
-	dprintf(D_ALWAYS, "Create process made PID %d\n", newpid);
 
 	// Now that we have a child, store the info in our pidTable
 	pidtmp = new PidEntry;

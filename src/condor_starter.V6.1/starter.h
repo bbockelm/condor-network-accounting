@@ -196,9 +196,6 @@ public:
 		/** Return the Working dir */
 	const char *GetWorkingDir() const { return WorkingDir.Value(); }
 
-		/** Return the Execute dir */
-	const char *GetExecuteDir() const { return Execute; }
-
 		/** Publish all attributes we care about for our job
 			controller into the given ClassAd.  Walk through all our
 			UserProcs and have them publish.

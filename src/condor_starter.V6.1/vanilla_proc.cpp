@@ -215,20 +215,6 @@ VanillaProc::StartJob()
 	}
 #endif
 
-#if defined(LINUX)
-
-	// On Linux kernel 2.6.24 and later, we can give each
-	// job its own PID namespace
-	if (param_boolean("USE_PID_NAMESPACES", false)) {
-		if (!can_switch_ids()) {
-			EXCEPT("USE_PID_NAMESPACES enabled, but can't perform this "
-					"call in Linux unless running as root.");
-		}
-		fi.want_pid_namespace = true;
-	}
-	dprintf(D_FULLDEBUG, "PID namespace option: %s\n", fi.want_pid_namespace ? "true" : "false");
-#endif
-
 #if defined(HAVE_EXT_LIBCGROUP)
 	// Determine the cgroup
 	char* cgroup_base = param("BASE_CGROUP"), *cgroup = NULL;
@@ -377,7 +363,6 @@ VanillaProc::StartJob()
 		// this hooks in yet.
 		//
 	}
-}
 
 	if (param_boolean("USE_NETWORK_NAMESPACES", false)) {
 		std::stringstream namespace_name_ss;
