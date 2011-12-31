@@ -35,9 +35,6 @@
 #include <sched.h>
 #include <sys/syscall.h>
 #include <sys/mount.h>
-#include <asm/ldt.h>
-#include <asm/prctl.h>
-#include <sys/prctl.h>
 
 static const char* MOUNT_PROC = "proc";
 static const char* MOUNT_SLASH_PROC = "/proc";
@@ -45,10 +42,6 @@ static const char* MOUNT_SLASH_PROC = "/proc";
 
 #if HAVE_RESOLV_H && HAVE_DECL_RES_INIT
 #include <resolv.h>
-#endif
-
-#if HAVE_CLONE
-#include <poll.h>
 #endif
 
 static const int DEFAULT_MAXCOMMANDS = 255;
@@ -121,10 +114,6 @@ CRITICAL_SECTION Big_fat_mutex; // coarse grained mutex for debugging purposes
 
 #if defined ( HAVE_SCHED_SETAFFINITY ) && !defined ( WIN32 )
 #include <sched.h>
-#endif
-
-#if !defined(CLONE_NEWPID)
-#define CLONE_NEWPID 0x20000000
 #endif
 
 static const char* EMPTY_DESCRIP = "<NULL>";
@@ -5709,13 +5698,7 @@ void DaemonCore::Send_Signal(classy_counted_ptr<DCSignalMsg> msg, bool nonblocki
 	// sanity check on the pid.  we don't want to do something silly like
 	// kill pid -1 because the pid has not been initialized yet.
 	int signed_pid = (int) pid;
-	// TODO: when using namespaces, it's possible to be PID 1!
-	// How should we handle this?
-#if defined(LINUX)
-	if ( signed_pid > -10 && signed_pid < 1 ) {
-#else
 	if ( signed_pid > -10 && signed_pid < 3 ) {
-#endif
 		EXCEPT("Send_Signal: sent unsafe pid (%d)",signed_pid);
 	}
 
@@ -6563,8 +6546,8 @@ public:
 		const sigset_t *the_sigmask,
 		size_t *core_hard_limit,
 		int		*affinity_mask,
-		NetworkNamespaceManager * network_manager,
-		FilesystemRemap *fs_remap
+		FilesystemRemap *fs_remap,
+		NetworkNamespaceManager * network_manager
 	): m_errorpipe(the_errorpipe), m_args(the_args),
 	   m_job_opt_mask(the_job_opt_mask), m_env(the_env),
 	   m_inheritbuf(the_inheritbuf),
@@ -6583,11 +6566,7 @@ public:
  	   m_fs_remap(fs_remap),
 	   m_wrote_tracking_gid(false),
 	   m_no_dprintf_allowed(false),
-	   m_priv_state(PRIV_UNKNOWN),
-	   m_priv_state_parent(PRIV_UNKNOWN),
-	   m_want_pid_namespace(want_pid_namespace),
-	   m_network_manager(network_manager),
-	   m_fs_remap(fs_remap)
+	   m_network_manager(network_manager)
 	{
 	}
 
@@ -6604,7 +6583,6 @@ public:
 
 	pid_t clone_safe_getpid();
 	pid_t clone_safe_getppid();
-	int child_registration(pid_t, pid_t, bool);
 
 	void writeTrackingGid(gid_t tracking_gid);
 	void writeExecError(int exec_errno);
@@ -6616,7 +6594,6 @@ private:
 		// should expect anything that is not const to potentially be
 		// modified.
 	const int (&m_errorpipe)[2];
-	int m_syncpipe[2];
 	const ArgList &m_args;
 	const int m_job_opt_mask;
 	const Env *m_env;
@@ -6645,11 +6622,6 @@ private:
 	char **m_unix_env;
 	size_t *m_core_hard_limit;
 	const int    *m_affinity_mask;
-#if HAVE_CLONE
-       unsigned long parent_fs_register;
-#endif
-	priv_state m_priv_state;
-	priv_state m_priv_state_parent;
 	Env m_envobject;
     FilesystemRemap *m_fs_remap;
 	bool m_wrote_tracking_gid;
@@ -6716,14 +6688,6 @@ pid_t CreateProcessForkit::fork_exec() {
 		dprintf(D_FULLDEBUG,"Create_Process: using fast clone() "
 		                    "to create child process.\n");
 
-			// syncpipe is used to give the child the go-ahead to exec.
-		if (pipe(m_syncpipe)) {
-			dprintf(D_ALWAYS, "Create_Process: cannot create process "
-				"because we were unable to create a new pipe: %s\n",
-				 strerror(errno));
-			return -1;
-		}
-
 		bool killed_child = false;
 
 		if (m_network_manager && m_network_manager->PreClone()) {
@@ -6736,8 +6700,8 @@ pid_t CreateProcessForkit::fork_exec() {
 			// environments, some extra steps may need to be taken to
 			// make a stack on the heap (to mark it as executable), so
 			// we just do it using the parent's stack space and we use
-			// synchronization with pipes to ensure the child is done 
-			// with the stack before the parent throws it away.
+			// CLONE_VFORK to ensure the child is done with the stack
+			// before the parent throws it away.
 		const int stack_size = 16384;
 		char child_stack[stack_size];
 
@@ -6753,23 +6717,20 @@ pid_t CreateProcessForkit::fork_exec() {
 		dprintf_before_shared_mem_clone();
 
 			// reason for flags passed to clone:
-			// CLONE_VM     - child shares same address space (so no time
-			//                wasted copying page tables)
-			// SIGCHLD      - we want this signal when child dies, as opposed
-			//                to some other non-standard signal
-
+			// CLONE_VM    - child shares same address space (so no time
+			//               wasted copying page tables)
+			// CLONE_VFORK - parent is suspended until child calls exec/exit
+			//               (so we do not throw away child's stack etc.)
+			// SIGCHLD     - we want this signal when child dies, as opposed
+			//               to some other non-standard signal
 
 		enterCreateProcessChild(this);
 
-		int flags = (CLONE_VM|SIGCHLD);
-
-		dprintf(D_ALWAYS, "About to clone.\n");
 		newpid = clone(
-				CreateProcessForkit::clone_fn,
-				child_stack_ptr,
-				flags,
-				this);
-		int clone_errno = errno;
+			CreateProcessForkit::clone_fn,
+			child_stack_ptr,
+			(CLONE_VM|(m_network_manager ? CLONE_VFORK : 0 )|SIGCHLD),
+			this );
 
 		if (m_network_manager) {
 			if ((m_network_manager->PostCloneParent(newpid))) {
@@ -6780,23 +6741,14 @@ pid_t CreateProcessForkit::fork_exec() {
 			}
 		}
 
-			// restore state
 		exitCreateProcessChild();
-		dprintf_after_shared_mem_clone();
 
-			// Close our resources.
-		close(m_errorpipe[0]);
+			// restore state
+		dprintf_after_shared_mem_clone();
 
 		if (killed_child) {
 			dprintf(D_ALWAYS, "Killed child PID %d because network manager failed.\n", newpid);
 		}
-
-		if ((newpid == -1) && (clone_errno == EINVAL)) {
-			dprintf(D_ALWAYS, "PID namespaces not supported in this kernel.\n");
-		}
-
-		if (m_priv_state_parent != PRIV_UNKNOWN)
-			set_priv(m_priv_state_parent);
 
 		return newpid;
 	}
@@ -6859,6 +6811,31 @@ void writeExecError(CreateProcessForkit *forkit,int exec_errno)
 void CreateProcessForkit::exec() {
 	gid_t  tracking_gid = 0;
 
+		// Keep in mind that there are two cases:
+		//   1. We got here by forking, (cannot modify parent's memory)
+		//   2. We got here by cloning, (can modify parent's memory)
+		// So don't screw up the parent's memory and don't allocate any
+		// memory assuming it will be freed on exec() or _exit().  All objects
+		// that allocate memory MUST BE in data structures that are cleaned
+		// up by the parent (e.g. this instance of CreateProcessForkit).
+		// We do have our own copy of the file descriptors and signal masks.
+
+		// All critical errors in this function should write out the error
+		// code to the error pipe and then should call _exit().  Since
+		// some of the functions called below may result in a call to
+		// exit() (e.g. dprintf could EXCEPT), we use daemonCore's
+		// exit() wrapper to catch these cases and do the right thing.
+		// That is, this function must be wrapped by calls to
+		// enterCreateProcessChild() and exitCreateProcessChild().
+
+		// make sure we're not going to try to share the lock file
+		// with our parent (if it's been defined).
+	dprintf_init_fork_child();
+
+		// close the read end of our error pipe and set the
+		// close-on-exec flag on the write end
+	close(m_errorpipe[0]);
+	fcntl(m_errorpipe[1], F_SETFD, FD_CLOEXEC);
 
 		/********************************************************
 			  Make sure we're not about to re-use a PID that
@@ -6887,6 +6864,8 @@ void CreateProcessForkit::exec() {
 			  Derek Wright <wright@cs.wisc.edu> 2004-12-15
 		********************************************************/
 
+	pid_t pid = clone_safe_getpid();
+	pid_t ppid = clone_safe_getppid();
 	DaemonCore::PidEntry* pidinfo = NULL;
 	if( (daemonCore->pidTable->lookup(pid, pidinfo) >= 0) ) {
 			// we've already got this pid in our table! we've got
@@ -6966,7 +6945,7 @@ void CreateProcessForkit::exec() {
 	pidenvid_init(&penvid);
 
 		// if we weren't inheriting the parent's environment, then grab out
-		// the parent's pidfamily history... and jam it into the child's
+		// the parent's pidfamily history... and jam it into the child's 
 		// environment
 	if ( HAS_DCJOBOPT_NO_ENV_INHERIT(m_job_opt_mask) ) {
 		int i;
@@ -6988,7 +6967,7 @@ void CreateProcessForkit::exec() {
 
 			// Propogate the ancestor history to the child's environment
 		for (i = 0; i < PIDENVID_MAX; i++) {
-			if (penvid.ancestors[i].active == TRUE) {
+			if (penvid.ancestors[i].active == TRUE) { 
 				m_envobject.SetEnv( penvid.ancestors[i].envid );
 			} else {
 					// After the first FALSE entry, there will never be
@@ -6999,8 +6978,8 @@ void CreateProcessForkit::exec() {
 	}
 
 		// create the new ancestor entry for the child's environment
-	if (pidenvid_format_to_envid(envid, PIDENVID_ENVID_SIZE,
-								 m_forker_pid, pid, m_time_of_fork, m_mii) == PIDENVID_BAD_FORMAT)
+	if (pidenvid_format_to_envid(envid, PIDENVID_ENVID_SIZE, 
+								 m_forker_pid, pid, m_time_of_fork, m_mii) == PIDENVID_BAD_FORMAT) 
 		{
 			dprintf ( D_ALWAYS, "Create_Process: Failed to create envid "
 					  "\"%s\" due to bad format. !\n", envid );
@@ -7048,18 +7027,15 @@ void CreateProcessForkit::exec() {
 		}
 		m_unix_args = m_args.GetStringArray();
 	}
-		// END pid family environment id propogation
-	dprintf(D_FULLDEBUG, "Finished PID family environment ID prop.\n");
+
 
 		// check to see if this is a subfamily
 	if( ( m_family_info != NULL ) ) {
 
 			//create a new process group if we are supposed to
-		if((!parent) && param_boolean( "USE_PROCESS_GROUPS", true )) {
+		if(param_boolean( "USE_PROCESS_GROUPS", true )) {
 
 				// Set sid is the POSIX way of creating a new proc group
-				// If we have our own PID namespace, we are already the session leader
-				// and this call will fail.
 			if( setsid() == -1 )
 				{
 					dprintf(D_ALWAYS, "Create_Process: setsid() failed: %s\n",
@@ -7073,7 +7049,7 @@ void CreateProcessForkit::exec() {
 
 		// regardless of whether or not we made an "official" unix
 		// process group above, ALWAYS contact the procd to register
-		// the child
+		// ourselves
 		//
 		ASSERT(daemonCore->m_proc_family != NULL);
 		if (daemonCore->m_proc_family->register_from_child()) {
@@ -7123,68 +7099,6 @@ void CreateProcessForkit::exec() {
 			}
 		}
 	}
-	return 0;
-}
-
-void CreateProcessForkit::exec() {
-	extern char **environ;
-
-		// Keep in mind that there are two cases:
-		//   1. We got here by forking, (cannot modify parent's memory)
-		//   2. We got here by cloning, (can modify parent's memory)
-		// So don't screw up the parent's memory and don't allocate any
-		// memory assuming it will be freed on exec() or _exit().  All objects
-		// that allocate memory MUST BE in data structures that are cleaned
-		// up by the parent (e.g. this instance of CreateProcessForkit).
-		// We do have our own copy of the file descriptors and signal masks.
-
-		// All critical errors in this function should write out the error
-		// code to the error pipe and then should call _exit().  Since
-		// some of the functions called below may result in a call to
-		// exit() (e.g. dprintf could EXCEPT), we use daemonCore's
-		// exit() wrapper to catch these cases and do the right thing.
-		// That is, this function must be wrapped by calls to
-		// enterCreateProcessChild() and exitCreateProcessChild().
-
-		// make sure we're not going to try to share the lock file
-		// with our parent (if it's been defined).
-	dprintf_init_fork_child();
-
-/*
-	unsigned long my_fs_register;
-	// Save our TLS area
-	if (syscall( SYS_arch_prctl, ARCH_GET_FS, &my_fs_register)) {
-		EXCEPT("Unable to retrieve my FS register\n");
-	}
-	// Restore the parent's TLS area
-	if (syscall( SYS_arch_prctl, ARCH_SET_FS, parent_fs_register)) {
-		EXCEPT("Unable to restore parent FS register\n");
-	}
-*/
-	pid_t pid = clone_safe_getpid();
-
-		// Wait until the parent informs us we can proceed.
-	char ok = 'n';
-	if (read(m_syncpipe[0], &ok, 1) != 1) {
-		// Our parent wants us to die...
-		// It actually just gives us a SIGKILL.  This should
-		// be unreachable.
-		write(m_errorpipe[1], &errno, sizeof(errno));
-		_exit(errno);
-	}
-	close(m_syncpipe[0]);
-	close(m_syncpipe[1]);
-
-		// close the read end of our error pipe and set the
-		// close-on-exec flag on the write end
-	close(m_errorpipe[0]);
-	if (fcntl(m_errorpipe[1], F_SETFD, FD_CLOEXEC)) {
-		// No clue if we will leak the pipe.  Bail.
-		dprintf(D_ALWAYS, "Unable to set error pipe to CLOEXEC: %s\n", strerror(errno));
-		write(m_errorpipe[1], &errno, sizeof(errno));
-		_exit(errno);
-	}
-	dprintf(D_FULLDEBUG, "Child will attempt to exec based on parent response.\n");
 
 	if (m_network_manager) {
 		int net_rc;
@@ -7196,85 +7110,6 @@ void CreateProcessForkit::exec() {
 			dprintf(D_FULLDEBUG, "Child believes network namespace is completely configured.\n");
 		}
 	}
-
-		// If we made it here, we didn't find the PID in our
-		// table, so it's safe to continue and eventually do the
-		// exec() in this process...
-
-		/////////////////////////////////////////////////////////////////
-		// figure out what stays and goes in the child's environment
-		/////////////////////////////////////////////////////////////////
-
-		// We may determine to seed the child's environment with the parent's.
-	if( HAS_DCJOBOPT_ENV_INHERIT(m_job_opt_mask) ) {
-		m_envobject.MergeFrom(environ);
-	}
-
-		// Put the caller's env requests into the job's environment, potentially
-		// adding/overriding things in the current env if the job was allowed to
-		// inherit the parent's environment.
-	if(m_env) {
-		m_envobject.MergeFrom(*m_env);
-	}
-
-		// if I have brought in the parent's environment, then ensure that
-		// after the caller's changes have been enacted, this overrides them.
-	if( HAS_DCJOBOPT_ENV_INHERIT(m_job_opt_mask) ) {
-
-			// add/override the inherit variable with the correct value
-			// for this process.
-		m_envobject.SetEnv( EnvGetName( ENV_INHERIT ), m_inheritbuf.Value() );
-
-		if( !m_privateinheritbuf.IsEmpty() ) {
-			m_envobject.SetEnv( EnvGetName( ENV_PRIVATE ), m_privateinheritbuf.Value() );
-		}
-			// Make sure PURIFY can open windows for the daemons when
-			// they start. This functionality appears to only exist when we've
-			// decided to inherit the parent's environment. I'm not sure
-			// what the ramifications are if we include it all the time so here
-			// it stays for now.
-		char *display;
-		display = param ( "PURIFY_DISPLAY" );
-		if ( display ) {
-			m_envobject.SetEnv( "DISPLAY", display );
-			free ( display );
-			char *purebuf;
-			purebuf = (char*)malloc(sizeof(char) * 
-									(strlen("-program-name=") + strlen(m_executable) +
-									 1));
-			if (purebuf == NULL) {
-				EXCEPT("Create_Process: PUREOPTIONS is out of memory!");
-			}
-			sprintf ( purebuf, "-program-name=%s", m_executable );
-			m_envobject.SetEnv( "PUREOPTIONS", purebuf );
-			free(purebuf);
-		}
-	}
-
-
-		// The child's environment:
-	m_unix_env = m_envobject.getStringArray();
-
-
-		/////////////////////////////////////////////////////////////////
-		// figure out what stays and goes in the job's arguments
-		/////////////////////////////////////////////////////////////////
-
-	if( m_args.Count() == 0 ) {
-		dprintf(D_DAEMONCORE, "Create_Process: Arg: NULL\n");
-		ArgList tmpargs;
-		tmpargs.AppendArg(m_executable);
-		m_unix_args = tmpargs.GetStringArray();
-	}
-	else {
-		if(DebugFlags & D_DAEMONCORE) {
-			MyString arg_string;
-			m_args.GetArgsStringForDisplay(&arg_string);
-			dprintf(D_DAEMONCORE, "Create_Process: Arg: %s\n", arg_string.Value());
-		}
-		m_unix_args = m_args.GetStringArray();
-	}
-
 
 
 		// This _must_ be called before calling exec().
@@ -7366,10 +7201,6 @@ void CreateProcessForkit::exec() {
 				}
 			}
 		}
-	}
-	if (m_fs_remap && m_fs_remap->PerformMappings()) {
-		write(m_errorpipe[1], &errno, sizeof(errno));
-		_exit(errno);
 	}
 
 	// Now remount filesystems with fs_bind option, to give this
@@ -7522,24 +7353,6 @@ void CreateProcessForkit::exec() {
 		}
 	}
 
-	// We need to remount /proc.  As we have our own mount namespace,
-	// this won't change the parent's memory.
-	if ((pid == 1) && mount(MOUNT_PROC, MOUNT_SLASH_PROC, MOUNT_PROC, 0, 0)) {
-		write(m_errorpipe[1], &errno, sizeof(errno));
-		_exit(errno);
-	}
-
-/*
-	if (syscall(SYS_arch_prctl, ARCH_SET_FS, my_fs_register)) {
-		EXCEPT("Unable to restore my TLS!");
-	}
-*/
-
-		// Restore the privilege state; only needed if we are going to use NEWPID
-	if (m_priv_state != PRIV_UNKNOWN) {
-		set_priv_no_memory_changes(m_priv_state);
-	}
-
 		// now head into the proper priv state...
 	if ( m_priv != PRIV_UNKNOWN ) {
 			// This is tricky in the case where we share memory with our
@@ -7608,7 +7421,6 @@ void CreateProcessForkit::exec() {
 
 		// and ( finally ) exec:
 	int exec_results;
-
 	exec_results =  execve(m_executable_fullpath, m_unix_args, m_unix_env);
 
 	if( exec_results == -1 ) {
@@ -7641,8 +7453,8 @@ int DaemonCore::Create_Process(
 			int			  *affinity_mask,
 			char const    *daemon_sock,
 			MyString      *err_return_msg,
-			NetworkNamespaceManager * network_manager,
-			FilesystemRemap * remap
+			FilesystemRemap * remap,
+			NetworkNamespaceManager * network_manager
             )
 {
 	int i, j;
@@ -8695,8 +8507,8 @@ int DaemonCore::Create_Process(
 			sigmask,
 			core_hard_limit,
 			affinity_mask,
-			network_manager,
-			remap);
+			remap,
+			network_manager);
 
 		newpid = forkit.fork_exec();
 	}
