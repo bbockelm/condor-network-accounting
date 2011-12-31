@@ -41,6 +41,7 @@
 #include "profile.WINDOWS.h"
 #include "access_desktop.WINDOWS.h"
 #endif
+#include "network_namespaces.h"
 
 extern CStarter *Starter;
 extern const char* JOB_WRAPPER_FAILURE_FILE;
@@ -70,7 +71,7 @@ OsProc::~OsProc()
 
 
 int
-OsProc::StartJob(FamilyInfo* family_info)
+OsProc::StartJob(FamilyInfo* family_info, NetworkNamespaceManager * network_manager = NULL, FilesystemRemap* fs_remap=NULL)
 {
 	int nice_inc = 0;
 	bool has_wrapper = false;
@@ -539,7 +540,9 @@ OsProc::StartJob(FamilyInfo* family_info)
 		                                     core_size_ptr,
                                              affinity_mask,
 											 NULL,
-                                             &create_process_err_msg);
+                                             &create_process_err_msg,
+                                             network_manager,
+					     fs_remap);
 	}
 
 	// Create_Process() saves the errno for us if it is an "interesting" error.

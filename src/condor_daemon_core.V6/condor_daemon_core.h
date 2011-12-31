@@ -60,6 +60,8 @@
 #include "condor_sinful.h"
 #include "condor_sockaddr.h"
 #include "generic_stats.h"
+#include "network_namespaces.h"
+#include "filesystem_remap.h"
 
 #include "../condor_procd/proc_family_io.h"
 class ProcFamilyInterface;
@@ -191,6 +193,7 @@ struct FamilyInfo {
 	gid_t* group_ptr;
 #endif
 	const char* glexec_proxy;
+	bool want_pid_namespace;
 	const char* cgroup;
 
 	FamilyInfo() {
@@ -200,6 +203,7 @@ struct FamilyInfo {
 		group_ptr = NULL;
 #endif
 		glexec_proxy = NULL;
+		want_pid_namespace = false;
 		cgroup = NULL;
 	}
 };
@@ -1128,7 +1132,9 @@ class DaemonCore : public Service
         size_t        *core_hard_limit     = NULL,
 		int			  *affinity_mask	   = NULL,
 		char const    *daemon_sock         = NULL,
-        MyString      *err_return_msg      = NULL
+        MyString      *err_return_msg      = NULL,
+	NetworkNamespaceManager * network_mgr = NULL,
+	FilesystemRemap *remap             = NULL
         );
 
     //@}
