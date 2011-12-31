@@ -31,13 +31,6 @@
 
 #include "condor_socket_types.h"
 
-#if HAVE_EXT_GCB
-#include "GCB.h"
-extern "C" {
-void Generic_stop_logging();
-}
-#endif
-
 #if HAVE_CLONE
 #include <sched.h>
 #include <sys/syscall.h>
@@ -1163,18 +1156,6 @@ DaemonCore::InfoCommandSinfulStringMyself(bool usePrivateAddress)
 			m_private_network_name = tmp;
 		}
 
-#if HAVE_EXT_GCB
-		if (sinful_private == NULL
-			&& (param_boolean("NET_REMAP_ENABLE", false, false))) {
-				// If the knob wasn't defined, and GCB is enabled, ask GCB.
-			struct sockaddr_in addr;
-			SOCKET_LENGTH_TYPE addr_len = sizeof(addr);
-			SOCKET sockd = ((Sock*)(*sockTable)[initial_command_sock].iosock)->get_file_desc();
-			if (GCB_real_getsockname(sockd, (struct sockaddr *)&addr, &addr_len) >= 0) {
-				sinful_private = strdup(sin_to_string(&addr));
-			}
-		}
-#endif /* HAVE_EXT_GCB */
 		initialized_sinful_private = true;
 		m_dirty_sinful = true;
 	}
@@ -2764,11 +2745,9 @@ DaemonCore::reconfig(void) {
 		// If we are NOT the schedd, then do not use clone, as only
 		// the schedd benefits from clone, and clone is more susceptable
 		// to failures/bugs than fork.
-	/*
-	if ( !(get_mySubSystem()->isType(SUBSYSTEM_TYPE_SCHEDD)) ) {
+	if (!get_mySubSystem()->isType(SUBSYSTEM_TYPE_SCHEDD)) {
 		m_use_clone_to_create_processes = false;
 	}
-	*/
 #endif /* HAVE CLONE */
 
 	m_invalidate_sessions_via_tcp = param_boolean("SEC_INVALIDATE_SESSIONS_VIA_TCP", true);
@@ -5902,7 +5881,7 @@ void DaemonCore::Send_Signal(classy_counted_ptr<DCSignalMsg> msg, bool nonblocki
 			// we just need to write something to ensure that the
 			// select() in Driver() does not block.
 			if ( async_sigs_unblocked == TRUE ) {
-				write(async_pipe[1],"!",1);
+				_condor_full_write(async_pipe[1],"!",1);
 			}
 #endif
 			msg->deliveryStatus( DCMsg::DELIVERY_SUCCEEDED );
@@ -6584,7 +6563,6 @@ public:
 		const sigset_t *the_sigmask,
 		size_t *core_hard_limit,
 		int		*affinity_mask,
-		bool want_pid_namespace,
 		NetworkNamespaceManager * network_manager,
 		FilesystemRemap *fs_remap
 	): m_errorpipe(the_errorpipe), m_args(the_args),
@@ -6602,6 +6580,7 @@ public:
 	   m_sigmask(the_sigmask), m_unix_args(0), m_unix_env(0),
 	   m_core_hard_limit(core_hard_limit),
 	   m_affinity_mask(affinity_mask),
+ 	   m_fs_remap(fs_remap),
 	   m_wrote_tracking_gid(false),
 	   m_no_dprintf_allowed(false),
 	   m_priv_state(PRIV_UNKNOWN),
@@ -6672,11 +6651,11 @@ private:
 	priv_state m_priv_state;
 	priv_state m_priv_state_parent;
 	Env m_envobject;
+    FilesystemRemap *m_fs_remap;
 	bool m_wrote_tracking_gid;
 	bool m_no_dprintf_allowed;
-	const bool m_want_pid_namespace;
 	NetworkNamespaceManager * m_network_manager;
-	FilesystemRemap *m_fs_remap;
+	priv_state m_priv_state;
 };
 
 enum {
@@ -7301,6 +7280,8 @@ void CreateProcessForkit::exec() {
 		// This _must_ be called before calling exec().
 	writeTrackingGid(tracking_gid);
 
+		// Create new filesystem namespace if wanted
+
 	int openfds = getdtablesize();
 
 		// Here we have to handle re-mapping of std(in|out|err)
@@ -7391,6 +7372,55 @@ void CreateProcessForkit::exec() {
 		_exit(errno);
 	}
 
+	// Now remount filesystems with fs_bind option, to give this
+	// process per-process tree mount table
+
+	// This requires rootly power
+	if (m_fs_remap) {
+		int ret = 0;
+		if (can_switch_ids()) {
+			m_priv_state = set_priv_no_memory_changes(PRIV_ROOT);
+#ifdef HAVE_UNSHARE
+			int rc = ::unshare(CLONE_NEWNS|CLONE_FS);
+			if (rc) {
+				dprintf(D_ALWAYS, "Failed to unshare the mount namespace\n");
+				ret = write(m_errorpipe[1], &errno, sizeof(errno));
+				if (ret < 1) {
+					_exit(errno);
+				} else {
+					_exit(errno);
+				}
+			}
+#else
+			dprintf(D_ALWAYS, "Can not remount filesystems because this system does not have unshare(2)\n");
+			errno = ENOSYS;
+			ret = write(m_errorpipe[1], &errno, sizeof(errno));
+			if (ret < 1) {
+				_exit(errno);
+			} else {
+				_exit(errno);
+			}
+#endif
+		} else {
+			dprintf(D_ALWAYS, "Not remapping FS as requested, due to lack of privileges.\n");
+			m_fs_remap = NULL;
+		}
+	}
+
+	if (m_fs_remap && m_fs_remap->PerformMappings()) {
+		int ret = write(m_errorpipe[1], &errno, sizeof(errno));
+		if (ret < 1) {
+			_exit(errno);
+		} else {
+			_exit(errno);
+		}
+	}
+
+	// And back to normal userness
+	if (m_fs_remap) {
+		set_priv_no_memory_changes( m_priv_state );
+	}
+
 
 		/* Re-nice ourself */
 	if( m_nice_inc > 0 ) {
@@ -7473,15 +7503,6 @@ void CreateProcessForkit::exec() {
 		// once again, make sure that if the dprintf code opened a
 		// lock file and has an fd, that we close it before we
 		// exec() so we don't leak it.
-#if HAVE_EXT_GCB
-		/*
-		  this method currently only lives in libGCB.a, so don't even
-		  try to param() or call this function unless we're on a
-		  platform where we're using the GCB external
-		*/
-	Generic_stop_logging();
-#endif
-
 	dprintf_wrapup_fork_child();
 
 	bool found;
@@ -7715,7 +7736,7 @@ int DaemonCore::Create_Process(
 	inheritbuf.sprintf("%lu ",(unsigned long)mypid);
 
 		// true = Give me a real local address, circumventing
-		//  GCB's trickery if present.  As this address is
+		//  CCB's trickery if present.  As this address is
 		//  intended for my own children on the same machine,
 		//  this should be safe.
 	{
@@ -8674,7 +8695,6 @@ int DaemonCore::Create_Process(
 			sigmask,
 			core_hard_limit,
 			affinity_mask,
-			family_info ? family_info->want_pid_namespace : false,
 			network_manager,
 			remap);
 
@@ -9204,9 +9224,13 @@ DaemonCore::Create_Thread(ThreadStartFunc start_func, void *arg, Stream *sock,
                 // we've already got this pid in our table! we've got
                 // to bail out immediately so our parent can retry.
             int child_errno = ERRNO_PID_COLLISION;
-            write(errorpipe[1], &child_errno, sizeof(child_errno));
+            int ret = write(errorpipe[1], &child_errno, sizeof(child_errno));
 			close( errorpipe[1] );
-            exit(4);
+			if (ret < 1) {
+				exit(4);
+			} else {
+				exit(4);
+			}
         }
 			// if we got this far, we know we don't need the errorpipe
 			// anymore, so we can close it now...
@@ -10869,6 +10893,7 @@ bool DaemonCore::ProcessExitedButNotReaped(pid_t pid)
 #ifndef WIN32
 	WaitpidEntry wait_entry;
 	wait_entry.child_pid = pid;
+	wait_entry.exit_status = 0; // ignored in WaitpidEntry::operator==, avoid uninit warning
 
 	if(WaitpidQueue.IsMember(wait_entry)) {
 		return true;

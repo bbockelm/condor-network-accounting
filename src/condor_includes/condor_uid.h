@@ -156,6 +156,7 @@ public:
 private:
 	// no default constructor
 	TemporaryPrivSentry();
+
 	// non-copyable.
 	TemporaryPrivSentry(const TemporaryPrivSentry&);
 	TemporaryPrivSentry& operator=(const TemporaryPrivSentry&);

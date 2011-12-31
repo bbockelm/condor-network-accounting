@@ -805,11 +805,24 @@ int RefreshProxyThruMyProxy(Proxy * proxy)
 
 
 	// Print password (this will end up in stdin for myproxy-get-delegation)
-	pipe (myProxyEntry->get_delegation_password_pipe);
-	write (myProxyEntry->get_delegation_password_pipe[1],
+	if (pipe (myProxyEntry->get_delegation_password_pipe)) {
+		dprintf(D_ALWAYS,
+				"Failed to pipe(2) in RefreshProxyThruMyProxy "
+				"for writing password, aborting\n");
+		return FALSE;
+	}
+	int written = write (myProxyEntry->get_delegation_password_pipe[1],
 		   myProxyEntry->myproxy_password,
 		   strlen (myProxyEntry->myproxy_password));
-	write (myProxyEntry->get_delegation_password_pipe[1], "\n", 1);
+	if (written < (int) strlen (myProxyEntry->myproxy_password)) {
+		dprintf(D_ALWAYS, "Failed to write to pipe in RefreshProxyThruMyProxy %d\n", errno);
+		return FALSE;
+    }
+	written = write (myProxyEntry->get_delegation_password_pipe[1], "\n", 1);
+	if (written < 1) {
+		dprintf(D_ALWAYS, "Failed to write to pipe in RefreshProxyThruMyProxy %d\n", errno);
+		return FALSE;
+	}
 
 
 	// Figure out user name;

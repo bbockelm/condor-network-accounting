@@ -16,6 +16,64 @@ New features will be added in the 7.7.x development series.
 The details of each version are described below.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\subsection*{\label{sec:New-7-6-6}Version 7.6.6}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\noindent Release Notes:
+
+\begin{itemize}
+
+\item Condor version 7.6.6 not yet released.
+%\item Condor version 7.6.6 released on Month Date, 2011.
+
+\end{itemize}
+
+
+\noindent New Features:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+\noindent Configuration Variable and ClassAd Attribute Additions and Changes:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+\noindent Bugs Fixed:
+
+\begin{itemize}
+
+\item Fixed a memory leak affecting the \Condor{schedd} when the
+  configuration setting
+  \MacroNI{EVENT\_LOG\_JOB\_AD\_INFORMATION\_ATTRS} and/or the submit
+  file command \SubmitCmd{job\_ad\_information\_attrs} were used.
+
+\end{itemize}
+
+\noindent Known Bugs:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+\noindent Additions and Changes to the Manual:
+
+\begin{itemize}
+
+\item None.
+
+\end{itemize}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsection*{\label{sec:New-7-6-5}Version 7.6.5}
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
@@ -23,8 +81,25 @@ The details of each version are described below.
 
 \begin{itemize}
 
-\item Condor version 7.6.5 not yet released.
-%\item Condor version 7.6.5 released on Month Date, 2011.
+\item Condor version 7.6.5 released on December 28, 2011.
+
+\item Restored the semantics of \Macro{GROUP\_AUTOREGROUP} to the
+behavior it exhibited before Hierarchical Group Quotas were introduced
+in Condor version 7.5.6.
+That behavior has submitters with no accounting group,
+which are listed as \Expr{<none>}, negotiate last.
+And, in addition, any accounting groups with \MacroNI{GROUP\_AUTOREGROUP}
+enabled negotiate both normally and then also along with the 
+submitters with no accounting group.
+For Condor versions 7.5.6 through 7.6.4, configuration variable
+\MacroNI{GROUP\_AUTOREGROUP} (or \MacroNI{GROUP\_AUTOREGROUP\_<groupname>})
+was a synonym for 
+\Macro{GROUP\_ACCEPT\_SURPLUS} 
+(or \MacroNI{GROUP\_ACCEPT\_SURPLUS\_<groupname>}).
+They now implement distinct features,
+and it is not legal to set both to \Expr{True} in the configuration
+for the \Condor{negotiator}.
+\Ticket{2679}
 
 \end{itemize}
 
@@ -50,6 +125,36 @@ to detect and utilize the load average information.
 \noindent Bugs Fixed:
 
 \begin{itemize}
+
+
+%\item Exposed the negotiation order of accounting groups to configuration
+%via the configuration parameter \Macro{GROUP\_SORT\_EXPR}.
+%\Ticket{2678}
+
+\item Fixed a bug in Chirp when using absolute file paths. This bug caused
+most MPI jobs to fail in the parallel universe.
+\Ticket{2630}
+
+\item Fixed a bug in mapping users using the \Macro{CERTIFICATE\_MAPFILE}
+mechanism, where entries using the NTSSPI method on Windows would not be mapped
+using the map file, but would instead fall back to just the user name.
+\Ticket{2709}
+
+\item Fixed a hierarchical accounting groups bug in which
+the \Condor{schedd} did not properly restore accounting group 
+information to submitters on a restart of the \Condor{schedd},
+and therefore negotiated for and allocated machines incorrectly.
+\Ticket{2705}
+
+\item The Windows installer had a bad value set for the configuration variable
+\Macro{JAVA\_CLASSPATH\_SEPARATOR}, causing java universe jobs to fail. 
+\Ticket{2586}
+
+\item \MacroNI{HDFS} was not listed in the default
+\MacroNI{DC\_DAEMON\_LIST}, so the \Condor{hdfs} daemon exited
+shortly after being started,
+and the HDFS service did not run.
+\Ticket{849}
 
 \item File System (FS) authentication now works when \File{/tmp} 
 is on a Btrfs file system.  Previously, authentication failed.
@@ -142,6 +247,45 @@ idle jobs or send ClassAds to the \Condor{collector}.
 hold reason contained a percent character (\verb|%|),
 and the user log for the job was in XML format.
 \Ticket{2660}
+
+\item Fixed a Windows 7 and Vista bug in \Condor{softkill},
+in which it would fail to kill the target process,
+when run by a Personal Condor inside a System Condor slot account.
+\Ticket{2677}
+
+\item A possible fix has been made for a problem in which the
+CCB-enabled daemon took an unexpectedly long time to timeout when
+reading from the CCB server.  Additional information is logged
+to help identify the problem if it still remains.
+\Ticket{2695}
+
+\item Fixed a bug in \Condor{dagman} that occurred when 
+dealing with nested splices.
+\Condor{dagman} incorrectly issued a parse error and exited
+in the case where the parent splice contained only splices, and no nodes jobs.
+\Ticket{1751}
+
+\item Fixed a bug that caused grid universe jobs submitted via SOAP to
+be held when trying to write output files into the spool directory.
+\Ticket{2568}
+
+\item Fixed a bug that caused \Condor{credd} and possibly other
+daemons to crash when the file used for \MacroNI{CERTIFICATE\_MAPFILE}
+contained more than 80 entries.
+\Ticket{2409}
+
+\item Fixed a bug that caused hibernation to fail on certain Linux platforms
+for certain hibernation states.
+To work correctly on these Linux platforms,
+the plug-in needs the command line arguments defined by
+\Macro{HIBERNATION\_PLUGIN\_ARGS} when initially invoked, 
+as well as for other invocations.  
+\Ticket{2561}
+
+\item The \Condor{schedd} now aborts the claim and reschedules the job,
+if it does not hear from the \Condor{startd} for longer than the job
+lease duration.
+\Ticket{2706}
 
 \end{itemize}
 

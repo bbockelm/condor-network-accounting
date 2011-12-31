@@ -30,7 +30,44 @@ The details of each version are described below.
 
 \begin{itemize}
 
-\item The \OptArg{-sort} option for \Condor{status} has been generalized to
+\item On Linux platforms, the \Condor{starter} can now optionally measure the
+PSS (Proportional Set Size) of each Condor job,
+if the configuration variable \Macro{USE\_PSS} is \Expr{True}.
+Previously, this measurement was unconditionally on,
+which can cause performance problems in the \Condor{procd} when running
+many short lived jobs.
+\Ticket{2710}
+
+\item On Linux systems, the \Condor{starter} now has an ability to run a 
+job under a chroot directory.  
+If the configuration variable \Macro{NAMED\_CHROOT} is set to a list
+of directories on an execute machine, 
+the job has attribute \Attr{RequestedChroot} defined,
+and the value of \Attr{RequestedChroot} matches an entry 
+in the list defined by \MacroNI{NAMED\_CHROOT},
+then the \Condor{starter} calls \Procedure{chroot} with that directory 
+as an argument.  
+Note that it is up to the administrator to provide a full environment 
+for the job to run in.
+\Ticket{2698}
+
+\item On Linux platforms which support a bind type of file system mount 
+(which are generally RHEL 5 systems and more recent platforms), 
+the administrator can configure the \Condor{startd} 
+to provide per-job file system mounts.  
+One use might be to provide each job its own view of \File{/tmp} 
+and \File{/var/tmp}, which are private to that Condor job,
+and cleared when the job exits.  
+This is implemented with the new \Macro{MOUNT\_UNDER\_SCRATCH} 
+configuration variable, which describes which directories to bind mount.
+\Ticket{2015}
+
+\item Added the new \Opt{-expand} option to \Condor{config\_val}.
+If both \Opt{-dump} and \Opt{-expand} options are specified,
+all configuration variables are expanded before they are printed out.
+\Ticket{2687}
+
+\item The \Opt{-sort} option for \Condor{status} has been generalized to
 accept expressions instead of just simple named attributes.
 \Ticket{2661}
 
@@ -68,6 +105,38 @@ additionally logs whether the match was subsequently rejected for
 other reasons, such as insufficient priority, rank, or fair share
 allocation.
 
+\item Condor will now send email,
+if the submit command \Expr{notification = Error} is set and
+the job is placed on hold because of a failure, and not by user request.
+Previously, email would be sent only if the job was terminated via signal.
+\Ticket{1976}
+
+\item The default settings for \Condor{dagman} have changed.
+Now, if a node has children, then \Condor{dagman} uses the
+\Attr{KeepClaimIdle} attribute, 
+introduced in Condor version 7.7.1, to hold onto a claim.
+This is a slight optimization, 
+as it avoids waiting for a negotiation cycle.
+The amount of time is controlled by the
+\Macro{DAGMAN\_HOLD\_CLAIM\_TIME} configuration variable.
+\Ticket{2673}
+
+\item Improved output of \Condor{q} \Opt{-dag} to show the dag structure as a tree,
+with children indented below their parents.
+\Ticket{1281}
+
+\item Fixed the output of \Condor{q} \Opt{-dag} so that children of a
+non-existent DAGman node would not be mistakenly shown as belonging to another
+DAGman. This can happen, for example, when a \Condor{dagman} process dies while
+its children are still running.
+\Ticket{2463}
+
+\item Added the new FINAL node feature to \Condor{dagman} -- this allows
+the user to declare a FINAL node in the DAG, which is always run at the
+end of the workflow, whether it ended successfully or not.
+See section~\ref{sec:DAGFinalNode} for details
+\Ticket{1482}
+
 \end{itemize}
 
 \noindent Configuration Variable and ClassAd Attribute Additions and Changes:
@@ -83,11 +152,33 @@ frequently written to \File{job\_queue.log},
 but not big enough to hold the whole contents of the spool directory.
 \Ticket{2598}
 
+\item The new configuration variable \Macro{DAGMAN\_HOLD\_CLAIM\_TIME}
+specifies the amount of time in seconds that \Condor{schedd} will hold a claim
+idle for a DAGman job, using the \AdAttr{KeepClaimIdle} attribute in the JobAd.
+
+\item \AdAttr{ResidentSetSize} and \AdAttr{ProportionalSetSizeKb} now
+report the maximum observed memory usage.  Previously, they reported
+the most recently observed memory usage.  This change makes these
+attributes similar to \AdAttr{ImageSize}, which also reports the
+maximum observed value.  Previously, \AdAttr{ResidentSetSize} was
+usually reported as 0 in the job history for completed jobs, because
+when the job was finished, the final observation of memory usage
+was 0.
+\Ticket{2725}
+
+\item \AdAttr{ResidentSetSize} is now rounded by default using the new
+default configuration setting
+\Expr{SCHEDD\_ROUND\_ATTR\_ResidentSetSize = 25\%}.
+
 \end{itemize}
 
 \noindent Bugs Fixed:
 
 \begin{itemize}
+
+\item \Condor{submit} would allow ec2\_secret\_access\_key and
+  ec2\_access\_key\_id to be directories.
+\Ticket{2619}
 
 \item Communication errors were not always correctly handled when
 fetching results of a query when using the \Opt{-stream} option to
@@ -120,6 +211,15 @@ and prevent the \Attr{x509UserProxyEmail} from being set properly for
 jobs forwarded via Condor-C.
 \Ticket{2655}
 
+\item Fixed a bug in \Condor{dagman} that caused a DAG to fail if node
+job user log files were actually symlinks.  This problem was introduced
+in the 7.7 series.
+\Ticket{2704}
+
+\item Fixed a bug where Condor did not count completed scheduler universe
+jobs in reported statistics.
+\Ticket{2731}
+
 \end{itemize}
 
 \noindent Known Bugs:
@@ -147,8 +247,9 @@ jobs forwarded via Condor-C.
 
 \begin{itemize}
 
-\item Condor version 7.7.4 not yet released.
-%\item Condor version 7.7.4 released on Month Date, 2011.
+\item Condor version 7.7.4 released on December 21, 2011.
+This release contains all features and bug fixes from Condor version 7.6.5 
+as are currently documented (section~\ref{sec:New-7-6-5}) in this manual. 
 
 \end{itemize}
 
@@ -484,7 +585,7 @@ as are currently documented (section~\ref{sec:New-7-6-4}) in this manual.
 linux.}
 A copy of these libraries is included with Condor, under
 \File{lib/condor/} in the tarball releases and under
-\File{/usr/lib/condor/} or \File{/yrs/lib64/condor/} in the native package
+\File{/usr/lib/condor/} or \File{/usr/lib64/condor/} in the native package
 releases.
 \Ticket{2389}
 \Ticket{2390}

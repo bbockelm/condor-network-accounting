@@ -365,17 +365,17 @@ JICShadow::Continue( void )
 
 bool JICShadow::allJobsDone( void )
 {
-	bool r1;
+	bool r1, r2 = false;
 	ClassAd update_ad;
 
 	r1 = JobInfoCommunicator::allJobsDone();
 
 	if (!m_did_transfer) {
 		publishJobExitAd( &update_ad );
-		updateShadow( &update_ad, true );
+		r2 = updateShadow( &update_ad, true );
 	}
 
-	return r1;
+	return r1 || r2;
 }
 
 

@@ -40,10 +40,6 @@
 #include "exit.h"
 #include "param_functions.h"
 
-#if HAVE_EXT_GCB
-#include "GCB.h"
-#endif
-
 #include "file_sql.h"
 #include "file_xml.h"
 
@@ -460,7 +456,11 @@ do_kill()
 		}
 	}
 	if( (PID_FILE = safe_fopen_wrapper_follow(pidFile, "r")) ) {
-		fscanf( PID_FILE, "%lu", &tmp_ul_int ); 
+		if (fscanf( PID_FILE, "%lu", &tmp_ul_int ) != 1) {
+			fprintf( stderr, "DaemonCore: ERROR: fscanf failed processing pid file %s\n",
+					 pidFile );
+			exit( 1 );
+		}
 		pid = (pid_t)tmp_ul_int;
 		fclose( PID_FILE );
 	} else {
@@ -695,7 +695,9 @@ linux_sig_coredump(int signum)
 	setgid(0);
 
 	if (core_dir != NULL) {
-		chdir(core_dir);
+		if (chdir(core_dir)) {
+			dprintf(D_ALWAYS, "Error: chdir(%s) failed: %s\n", core_dir, strerror(errno));
+		}
 	}
 
 	WriteCoreDump("core");
@@ -1506,27 +1508,6 @@ handle_dc_sigquit( Service*, int )
 	return TRUE;
 }
 
-void
-handle_gcb_recovery_failed( )
-{
-	dprintf( D_ALWAYS, "GCB failed to recover from a failure with the "
-			 "Broker. Performing fast shutdown.\n" );
-	dc_main_shutdown_fast();
-}
-
-#if HAVE_EXT_GCB
-static void
-gcb_recovery_failed_callback()
-{
-		// BEWARE! This function is called by GCB. Most likely, either
-		// DaemonCore is blocked on a select() or CEDAR is blocked on a
-		// network operation. So we register a daemoncore timer to do
-		// the real work.
-	daemonCore->Register_Timer( 0, handle_gcb_recovery_failed,
-								"handle_gcb_recovery_failed" );
-}
-#endif
-
 const size_t OOM_RESERVE = 2048;
 static char *oom_reserve_buf;
 static void OutOfMemoryHandler()
@@ -2175,11 +2156,6 @@ int dc_main( int argc, char** argv )
 	{
 		EXCEPT("Failed to create async pipe socket pair");
 	}
-#endif
-
-#if HAVE_EXT_GCB
-		// Set up our GCB failure callback
-	GCB_Recovery_failed_callback_set( gcb_recovery_failed_callback );
 #endif
 
 	if ( dc_main_pre_command_sock_init ) {

@@ -1537,7 +1537,6 @@ std::string *GT4Job::buildSubmitRSL()
 	char *rsl_suffix = NULL;
 	StringList stage_in_list;
 	StringList stage_out_list;
-	bool staging_input = false;
 	std::string local_url_base = "";
 
 	if ( !jobAd->LookupString( ATTR_GRIDFTP_URL_BASE, local_url_base ) ) {
@@ -1812,8 +1811,6 @@ std::string *GT4Job::buildSubmitRSL()
 		// Now add the input staging directives to the job description
 	if ( create_remote_iwd || transfer_executable ||
 		 !stage_in_list.isEmpty() ) {
-
-		staging_input = true;
 
 		*rsl += "<fileStageIn>";
 		*rsl += "<maxAttempts>5</maxAttempts>";
@@ -2133,7 +2130,7 @@ GT4Job::printXMLParam (const char * name, const char * value) {
 // gridmanger scratch dir. NOT thread-safe.
 const char*
 GT4Job::getDummyJobScratchDir() {
-	const int dir_mode = 0500;
+	const unsigned int dir_mode = 0500;
 	const char *return_val = NULL;
 	static std::string dirname;
 	static time_t last_check = 0;

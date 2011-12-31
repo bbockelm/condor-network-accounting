@@ -5019,6 +5019,12 @@ SetGridParams()
 				exit(1);
 			}
 			fclose(fp);
+
+			StatInfo si(full_path(tmp));
+			if (si.IsDirectory()) {
+				fprintf(stderr, "\nERROR: %s is a directory\n", full_path(tmp));
+				exit(1);
+			}
 		}
 		buffer.sprintf( "%s = \"%s\"", ATTR_EC2_ACCESS_KEY_ID, full_path(tmp) );
 		InsertJobExpr( buffer.Value() );
@@ -5038,6 +5044,12 @@ SetGridParams()
 				exit(1);
 			}
 			fclose(fp);
+
+			StatInfo si(full_path(tmp));
+			if (si.IsDirectory()) {
+				fprintf(stderr, "\nERROR: %s is a directory\n", full_path(tmp));
+				exit(1);
+			}
 		}
 		buffer.sprintf( "%s = \"%s\"", ATTR_EC2_SECRET_ACCESS_KEY, full_path(tmp) );
 		InsertJobExpr( buffer.Value() );
@@ -6608,7 +6620,7 @@ check_open( const char *name, int flags )
 	}
 
 	if ( !DisableFileChecks ) {
-		if( (fd=safe_open_wrapper(strPathname.Value(),flags | O_LARGEFILE,0664)) < 0 ) {
+		if( (fd=safe_open_wrapper_follow(strPathname.Value(),flags | O_LARGEFILE,0664)) < 0 ) {
 			// note: Windows does not set errno to EISDIR for directories, instead you get back EACCESS
 			if( ( errno == EISDIR || errno == EACCES ) &&
 	                   check_directory( strPathname.Value(), flags, errno ) ) {

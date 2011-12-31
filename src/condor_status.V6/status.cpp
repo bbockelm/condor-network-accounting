@@ -98,6 +98,7 @@ char		*myName;
 vector<SortSpec> sortSpecs;
 bool            javaMode = false;
 bool			vmMode = false;
+bool        absentMode = false;
 char 		*target = NULL;
 ClassAd		*targetAd = NULL;
 ArgList projList;		// Attributes that we want the server to send us
@@ -273,6 +274,18 @@ main (int argc, char *argv[])
 		projList.AppendArg(ATTR_JAVA_VENDOR);
 		projList.AppendArg(ATTR_JAVA_VERSION);
 
+	}
+	
+	if(absentMode) {
+	    sprintf( buffer, "%s == TRUE", ATTR_ABSENT );
+	    if (diagnose) {
+	        printf( "Adding constraint %s\n", buffer );
+	    }
+	    query->addANDConstraint( buffer );
+	    
+	    projList.AppendArg( ATTR_ABSENT );
+	    projList.AppendArg( ATTR_LAST_HEARD_FROM );
+	    projList.AppendArg( ATTR_CLASSAD_LIFETIME );
 	}
 
 	if(vmMode) {
@@ -477,7 +490,7 @@ main (int argc, char *argv[])
                 // This will properly render all supported value types,
                 // including undefined and error, although current semantic
                 // pre-filters classads where sort expressions are undef/err:
-                vs << v;
+                vs << ((v.IsStringValue())?"\"":"") << v << ((v.IsStringValue())?"\"":"");
                 ad->AssignExpr(ss->keyAttr.c_str(), vs.str().c_str());
                 // Save the full expr in case user wants to examine on output:
                 ad->AssignExpr(ss->keyExprAttr.c_str(), ss->arg.c_str());
@@ -681,6 +694,9 @@ firstPass (int argc, char *argv[])
 		} else
 		if (matchPrefix (argv[i], "-java", 2)) {
 			javaMode = true;
+		} else
+		if (matchPrefix (argv[i], "-absent", 3)) {
+			absentMode = true;
 		} else
 		if (matchPrefix (argv[i], "-vm", 3)) {
 			vmMode = true;

@@ -7081,7 +7081,7 @@ id=432
 
 [JAVA_BENCHMARK_TIME]
 aliases=
-default=2
+default=0
 version=0.0.0
 range=.*
 state=default
@@ -8904,22 +8904,6 @@ url=http://cs.wisc.edu/condor/manual/v7.3/3_3Configuration.html#SECTION
 tags=master,master
 id=541
 
-[MASTER_GCB_RECONNECT_TIMEOUT]
-aliases=
-default=300
-version=0.0.0
-range=.*
-state=default
-type=int
-is_macro=false
-reconfig=true
-customization=seldom
-friendly_name=Master Gcb Reconnect Timeout
-usage=
-url=http://cs.wisc.edu/condor/manual/v7.3/3_3Configuration.html#SECTION
-tags=master,master
-id=542
-
 [DC_DAEMON_LIST]
 aliases=
 default=
@@ -8983,22 +8967,6 @@ usage=one from this setting.
 url=http://cs.wisc.edu/condor/manual/v7.3/3_3Configuration.html#SECTION
 tags=master,master
 id=546
-
-[MASTER_WAITS_FOR_GCB_BROKER]
-aliases=
-default=true
-version=0.0.0
-range=.*
-state=default
-type=bool
-is_macro=false
-reconfig=true
-customization=seldom
-friendly_name=Master Waits For Gcb Broker
-usage=
-url=http://cs.wisc.edu/condor/manual/v7.3/3_3Configuration.html#SECTION
-tags=master,master
-id=549
 
 [COLLECTOR_LOG]
 aliases=
@@ -10153,6 +10121,22 @@ url=
 tags=schedd
 id=602
 
+[SCHEDD_ROUND_ATTR_ResidentSetSize]
+aliases=
+default=25%
+version=0.0.0
+range=.*
+state=default
+type=string
+is_macro=false
+reconfig=false
+customization=seldom
+friendly_name=
+usage=
+url=
+tags=schedd
+id=602
+
 [ENABLE_VERSIONED_OPSYS]
 aliases=
 default=true
@@ -10393,3 +10377,19 @@ usage=Job Queue File
 url=http://cs.wisc.edu/condor/manual/v7.3/3_3Configuration.html#SECTION
 tags=defrag
 id=550
+
+[GROUP_SORT_EXPR]
+aliases=
+default=ifThenElse(GroupResourcesAllocated>0.0,GroupResourcesInUse/GroupResourcesAllocated,3.40282e+38)
+version=0.0.0
+range=.*
+state=default
+type=string
+is_macro=false
+reconfig=true
+customization=seldom
+friendly_name=Accounting Group Sorting Expression
+usage=
+url=
+tags=negotiator
+id=666

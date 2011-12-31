@@ -180,6 +180,8 @@ privsep_get_switchboard_response(FILE* err_fp)
 	return true;
 }
 
+static int write_error_code;
+
 static pid_t
 privsep_launch_switchboard(const char* op, FILE*& in_fp, FILE*& err_fp)
 {
@@ -235,7 +237,7 @@ privsep_launch_switchboard(const char* op, FILE*& in_fp, FILE*& err_fp)
 	            cmd.Value(),
 	            strerror(errno),
 	            errno);
-	write(child_err_fd, err.Value(), err.Length());
+	write_error_code = write(child_err_fd, err.Value(), err.Length());
 	_exit(1);
 }
 
@@ -281,7 +283,7 @@ privsep_exec_set_args(FILE* fp, ArgList& args)
 {
 	int num_args = args.Count();
 	for (int i = 0; i < num_args; i++) {
-		fprintf(fp, "exec-arg<%lu>\n", strlen(args.GetArg(i)));
+		fprintf(fp, "exec-arg<%lu>\n", (unsigned long)strlen(args.GetArg(i)));
 		fprintf(fp, "%s\n", args.GetArg(i));
 	}
 }
@@ -291,7 +293,7 @@ privsep_exec_set_env(FILE* fp, Env& env)
 {
 	char** env_array = env.getStringArray();
 	for (char** ptr = env_array; *ptr != NULL; ptr++) {
-		fprintf(fp, "exec-env<%lu>\n", strlen(*ptr));
+		fprintf(fp, "exec-env<%lu>\n", (unsigned long)strlen(*ptr));
 		fprintf(fp, "%s\n", *ptr);
 	}
 	deleteStringArray(env_array);
