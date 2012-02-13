@@ -1732,16 +1732,6 @@ jobs, where the grid resource has a \SubmitCmd{grid-type-string} of
 \SubmitCmd{gt2}.
 
 %%%%%%%%%%%%%%%%%%%
-%% globus_xml
-%%%%%%%%%%%%%%%%%%%
-
-\index{submit commands!globus\_xml}
-\item[globus\_xml = $<$XML-string$>$]
-Used to provide any additional attributes in the GRAM XML job description
-that Condor writes which are not covered by regular submit description
-file parameters. Used for grid type \SubmitCmd{gt4} jobs.
-
-%%%%%%%%%%%%%%%%%%%
 %% grid_resource
 %%%%%%%%%%%%%%%%%%%
 \index{submit commands!grid\_resource}
@@ -1754,8 +1744,9 @@ Allowable \SubmitCmd{grid-type-string} values are
 \SubmitCmd{condor}, \SubmitCmd{cream}, 
 \SubmitCmd{deltacloud}, 
 \SubmitCmd{ec2},
-\SubmitCmd{gt2}, \SubmitCmd{gt4}, \SubmitCmd{gt5},
+\SubmitCmd{gt2}, \SubmitCmd{gt5},
 \SubmitCmd{lsf}, \SubmitCmd{nordugrid}, \SubmitCmd{pbs},
+\SubmitCmd{sge},
 and \SubmitCmd{unicore}.
 See section~\ref{sec:GridUniverse} for details on the variety of 
 grid types.
@@ -1788,12 +1779,6 @@ For a \SubmitCmd{grid-type-string} of \SubmitCmd{gt2},
 the single parameter is the name of the pre-WS GRAM resource to be used.
 See section~\ref{sec:Using-gt2} for details.
 
-For a \SubmitCmd{grid-type-string} of \SubmitCmd{gt4},
-the first parameter is the name of the WS GRAM service to be used.
-The second parameter is the name of WS resource to be used (usually the
-name of the back-end scheduler).
-See section~\ref{sec:Using-gt4} for details.
-
 For a \SubmitCmd{grid-type-string} of \SubmitCmd{gt5},
 the single parameter is the name of the pre-WS GRAM resource to be used,
 which is the same as for the \SubmitCmd{grid-type-string} of \SubmitCmd{gt2}.
@@ -1810,6 +1795,10 @@ See section~\ref{sec:NorduGrid} for details.
 For a \SubmitCmd{grid-type-string} of \SubmitCmd{pbs}, no additional
 parameters are used.
 See section~\ref{sec:PBS} for details.
+
+For a \SubmitCmd{grid-type-string} of \SubmitCmd{sge}, no additional
+parameters are used.
+See section~\ref{sec:SGE} for details.
 
 For a \SubmitCmd{grid-type-string} of \SubmitCmd{unicore},
 the first parameter is the name of the Unicore Usite to be used.
@@ -2005,7 +1994,7 @@ it will search in the default location.
 the \SubmitCmd{universe} is \SubmitCmd{vanilla},
 or when the \SubmitCmd{universe} is \SubmitCmd{grid}
 and the type of grid system is one of \SubmitCmd{gt2},
-\SubmitCmd{gt4}, or \SubmitCmd{nordugrid}.
+\SubmitCmd{gt5}, or \SubmitCmd{nordugrid}.
 Defining a value causes the proxy to be delegated to the execute machine.
 Further, VOMS attributes defined in the proxy will appear in
 the job ClassAd.

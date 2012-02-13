@@ -600,6 +600,20 @@ our %submit_info = (
 	##########################################################################
 	'x86_64_macos_10.6-updated' => 'x86_64_macos_10.6',
 
+	# This is new batlab macos 10.7 machine
+	'x86_64_macos_10.7' => {
+		'build' => {
+			'configure_args' => { @minimal_build_configure_args },
+			'prereqs'	=> [ ],
+			'xtests'	=> undef,
+		},
+
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ @default_prereqs ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
 	##########################################################################
 	# Platform RHEL 5 on x86
 	##########################################################################
@@ -901,6 +915,23 @@ our %submit_info = (
 			'testclass' => [ @default_testclass ],
 		},
 	},
+
+	'x86_sl_5.7' => {
+		'build' => {
+			'configure_args' => { @default_build_configure_args,
+								  '-DCLIPPED:BOOL' => 'OFF',
+			},
+			'prereqs'	=> [ ],
+			'xtests'	=> undef,
+		},
+
+		'test' => {
+			'configure_args' => { @default_test_configure_args },
+			'prereqs'	=> [ ],
+			'testclass' => [ @default_testclass ],
+		},
+	},
+
 
 
 	##########################################################################

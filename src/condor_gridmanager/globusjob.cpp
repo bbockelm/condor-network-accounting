@@ -986,6 +986,8 @@ void GlobusJob::doEvaluateState()
 		old_gm_state = gmState;
 		old_globus_state = globusState;
 
+		ASSERT ( gahp != NULL || gmState == GM_HOLD || gmState == GM_DELETE );
+
 		switch ( gmState ) {
 		case GM_INIT: {
 			// This is the state all jobs start in when the GlobusJob object
@@ -3540,11 +3542,14 @@ GlobusJob::JmShouldSleep()
 		return false;
 	}
 	if ( jmProxyExpireTime < jobProxy->expiration_time ) {
-		if ( time(NULL) >= jmProxyExpireTime - 6*3600 ) {
+		// Don't forward the refreshed proxy if the remote proxy has more
+		// than GRIDMANAGER_PROXY_RENEW_LIMIT time left.
+		int renew_min = param_integer( "GRIDMANAGER_PROXY_REFRESH_TIME", 6*3600 );
+		if ( time(NULL) >= jmProxyExpireTime - renew_min ) {
 			return false;
 		} else {
 			daemonCore->Reset_Timer( evaluateStateTid,
-								 ( jmProxyExpireTime - 6*3600 ) - time(NULL) );
+								 ( jmProxyExpireTime - renew_min ) - time(NULL) );
 		}
 	}
 	if ( condorState != IDLE && condorState != RUNNING ) {

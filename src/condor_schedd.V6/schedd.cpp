@@ -1,6 +1,6 @@
 /***************************************************************
  *
- * Copyright (C) 1990-2010, Condor Team, Computer Sciences Department,
+ * Copyright (C) 1990-2012, Condor Team, Computer Sciences Department,
  * University of Wisconsin-Madison, WI.
  * 
  * Licensed under the Apache License, Version 2.0 (the "License"); you
@@ -5400,6 +5400,28 @@ Scheduler::contactStartd( ContactStartdArgs* args )
 		return;
 	}
 
+		// If the slot we are about to claim is partitionable, edit it
+		// so it will look like the resulting dynamic slot. We want to avoid 
+		// re-using a claim to a partitionable slot
+		// for jobs that do not fit the dynamically created slot. In the
+		// past we did this fixup during the negotiation cycle, but now that
+		// we can get matches directly back from the startd, we need to do it
+		// here as well.
+	if ( (jobAd && mrec && mrec->my_match_ad) && 
+		!ScheddNegotiate::fixupPartitionableSlot(jobAd,mrec->my_match_ad) )
+	{
+			// The job classad does not have required attributes (such as 
+			// requested memory) to enable the startd to create a dynamic slot.
+			// Since this claim request is simply going to fail, lets throw
+			// this match away now (seems like we could do something better?) - 
+			// while it is not ideal to throw away the match in this instance,
+			// it is consistent with what we current do during negotiation.
+		DelMrec ( mrec );
+		return;
+	}
+
+		// Setup to claim the slot asynchronously
+
 	jobAd->Assign( ATTR_STARTD_SENDS_ALIVES, mrec->m_startd_sends_alives );
 
 	classy_counted_ptr<DCMsgCallback> cb = new DCMsgCallback(
@@ -5490,7 +5512,56 @@ Scheduler::claimedStartd( DCMsgCallback *cb ) {
 		}
 	}
 
-	if( match->is_dedicated ) {
+	// If the startd returned any "leftover" partitionable slot resources,
+	// we want to create a match record for it (so we can subsequently find
+	// a job to run on it). 
+	if ( msg->have_leftovers()) {			
+
+		ScheddNegotiate *sn;
+		if (match->is_dedicated) {
+			// Pass NULLs to constructor since we aren't actually going to
+			// negotiate - we just want to invoke 
+			// MainScheddNegotiate::scheduler_handleMatch(), which
+			// probably could/should be changed to be declared as a static method.
+			// Actually, must pass in owner so FindRunnableJob will find a job.
+
+			sn = new DedicatedScheddNegotiate(0, NULL, match->user, NULL);
+		} else {
+			// Use the DedSched
+			sn = new MainScheddNegotiate(0, NULL, match->user, NULL);
+		}		
+
+			// Setting cluster.proc to -1.-1 should result in the schedd
+			// invoking FindRunnableJob to select an appropriate matching job.
+		PROC_ID jobid;
+		jobid.cluster = -1; jobid.proc = -1;
+
+		if (match->is_dedicated) {
+			const ClassAd *msg_ad = msg->getJobAd();
+			msg_ad->LookupInteger(ATTR_CLUSTER_ID, jobid.cluster);
+			msg_ad->LookupInteger(ATTR_PROC_ID, jobid.proc);
+		}
+			// Need to pass handleMatch a slot name; grab from leftover slot ad
+		std::string slot_name_buf;
+		msg->leftover_startd_ad()->LookupString(ATTR_NAME,slot_name_buf);
+		char const *slot_name = slot_name_buf.c_str();
+
+			// dprintf a message saying we got a new match, but be certain
+			// to only output the public claim id (keep the capability private)
+		ClaimIdParser idp( msg->leftover_claim_id() );
+		dprintf( D_FULLDEBUG,
+				"Received match from startd, leftover slot ad %s claim %s\n",
+				slot_name, idp.publicClaimId()  );
+
+			// Tell the schedd about the leftover resources it can go claim.
+			// Note this claiming will happen asynchronously.
+		sn->scheduler_handleMatch(jobid,msg->leftover_claim_id(),
+			*(msg->leftover_startd_ad()),slot_name);
+
+		delete sn;
+	} 
+
+	if (match->is_dedicated) {
 			// Set a timer to call handleDedicatedJobs() when we return,
 			// since we might be able to spawn something now.
 		dedicated_scheduler.handleDedicatedJobTimer( 0 );
@@ -9223,8 +9294,19 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 	GetAttributeInt(job_id.cluster, job_id.proc, ATTR_IMAGE_SIZE, &job_image_size);
 	int job_start_date = 0;
 	int job_running_time = 0;
-	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_START_DATE, &job_start_date))
+	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_DATE, &job_start_date))
 		job_running_time = (updateTime - job_start_date);
+
+	int job_start_exec_date = 0, job_start_xfer_out_date = 0;
+	int job_pre_exec_time = 0, job_post_exec_time = 0;
+	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_EXECUTING_DATE, &job_start_exec_date))
+		job_pre_exec_time = MAX(0, job_start_exec_date - job_start_date);
+	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, &job_start_xfer_out_date))
+		job_post_exec_time = MAX(0, updateTime - job_start_xfer_out_date);
+
+	stats.JobsAccumPreExecuteTime += job_pre_exec_time;
+	stats.JobsAccumPostExecuteTime += job_post_exec_time;
+	stats.JobsAccumExecuteTime += MAX(0, job_running_time - (job_pre_exec_time + job_post_exec_time));
 
 		// We get the name of the daemon that had a problem for 
 		// nice log messages...
@@ -12423,7 +12505,14 @@ holdJobRaw( int cluster, int proc, const char* reason,
 	dprintf( D_ALWAYS, "Job %d.%d put on hold: %s\n", cluster, proc,
 			 reason );
 
-	abort_job_myself( tmp_id, JA_HOLD_JOBS, true, notify_shadow );
+	// replacing this with the call to enqueueActOnJobMyself
+	// in holdJob AFTER the transaction; otherwise the job status
+	// doesn't get properly updated for some reason
+	//abort_job_myself( tmp_id, JA_HOLD_JOBS, true, notify_shadow );
+        if(!notify_shadow)	
+	{
+		dprintf( D_ALWAYS, "notify_shadow set to false but will still notify- this should not be optional");
+	}
 
 		// finally, email anyone our caller wants us to email.
 	if( email_user || email_admin ) {
@@ -12477,6 +12566,15 @@ holdJob( int cluster, int proc, const char* reason,
 		} else {
 			AbortTransaction();
 		}
+	}
+
+	// need this now to take the place of abort_job_myself
+	// within holdJobRaw to ensure correct job status change
+	if (result) {
+		PROC_ID id;
+		id.cluster = cluster;
+		id.proc = proc;
+		scheduler.enqueueActOnJobMyself(id,JA_HOLD_JOBS,true);
 	}
 
 	return result;

@@ -141,9 +141,6 @@ foreach ($platforms AS $platform) {
   if(preg_match("/^x86_64_/", $display)) {
     $display = preg_replace("/x86_64_/", "x86_64<br>", $display);
   }
-  elseif(preg_match("/ia64_/", $display)) {
-    $display = preg_replace("/ia64_/", "x86<br>", $display);
-  }
   else {
     $display = preg_replace("/x86_/", "x86<br>", $display);
   }
@@ -172,7 +169,14 @@ foreach ($builds as $build_runid => $test_runids) {
 
 	  $task_link = sprintf(TASK_URL, $platform, urlencode($test), $test_runid);
 
-	  $contents = "<div class='status'><a href='$task_link'>" . $history[$test_runid][$platform]["result"] . "</a></div>";
+	  if($history[$test_runid][$platform]["result"] == 0) {
+	    $pretty_resultval = "&nbsp;";
+	  }
+	  else {
+	    $pretty_resultval = $dash->get_nmi_result_text($history[$test_runid][$platform]["result"]);
+	  }
+
+	  $contents = "<div class='status'><a href='$task_link' style='text-decoration:none'>$pretty_resultval</a></div>";
 	  $contents .= "<div class='time'><a href='$task_link'>" . sec_to_min($history[$test_runid][$platform]["length"]) . "</a></div>";
 	  print "  <td class=\"$class\">$contents</td>\n";
 	  $found_task = 1;

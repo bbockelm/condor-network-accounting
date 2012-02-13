@@ -172,6 +172,16 @@ sub runcmd {
 		#print "$key\n";
 	#}
 
+	# some common *nix shell commands aren't valid on windows, but instead of fixing 
+	# all of the tests, it's easier to just re-write the command stings here
+	if ($^O =~ /MSWin32/) {
+		if ($args =~ /^mkdir \-p/) {
+			$args =~ s/^mkdir \-p/mkdir/;
+			$args =~ s/\/cygwin\/c/c:/;
+			$args =~ s/\//\\/g;
+		}
+	}
+
 	my $rc = undef;
 	my @outlines;
 	my @errlines;
@@ -473,13 +483,16 @@ sub Which {
 
     return "" if(!$exe);
 
+    if( is_windows_native_perl() ) {
+        return `\@for \%I in ($exe) do \@echo(\%~\$PATH:I`;
+    }
     foreach my $path (split /:/, $ENV{PATH}) {
         chomp $path;
         if(-x "$path/$exe") {
             return "$path/$exe";
         }
     }
-    
+
     return "";
 }
 
@@ -499,6 +512,20 @@ sub fullchomp {
 sub is_windows {
     if (($^O =~ /MSWin32/) || ($^O =~ /cygwin/)) {
         return 1;
+    }
+    return 0;
+}
+
+sub is_cygwin_perl {
+    if ($^O =~ /cygwin/) {
+        return 1;
+    }
+    return 0;
+}
+
+sub is_windows_native_perl {
+    if ($^O =~ /MSWin32/) {
+         return 1;
     }
     return 0;
 }

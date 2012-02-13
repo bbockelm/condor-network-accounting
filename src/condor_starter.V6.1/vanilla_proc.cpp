@@ -120,7 +120,7 @@ VanillaProc::StartJob()
 					CONDOR_EXEC, 
 					condor_basename ( jobname.Value () ) ) ) {
 				filename.sprintf ( "condor_exec%s", extension );
-				rename ( CONDOR_EXEC, filename.Value () );					
+				rename ( CONDOR_EXEC, filename.Value () );
 			} else {
 				filename = jobname;
 			}
@@ -260,7 +260,7 @@ VanillaProc::StartJob()
                                dprintf(D_ALWAYS, "Invalid named chroot: %s\n", chroot_spec.Value());
                        }
                        dprintf(D_FULLDEBUG, "Considering directory %s for chroot %s.\n", next_dir, chroot_spec.Value());
-                       if (IsDirectory(next_dir) && (strcmp(requested_chroot_name.c_str(), chroot_name) == 0)) {
+                       if (IsDirectory(next_dir) && chroot_name && (strcmp(requested_chroot_name.c_str(), chroot_name) == 0)) {
                                acceptable_chroot = true;
                                requested_chroot = next_dir;
                        }
@@ -320,7 +320,9 @@ VanillaProc::StartJob()
 			free(mount_under_scratch);
 
 			mount_list.rewind();
-			fs_remap = new FilesystemRemap();
+			if (!fs_remap) {
+				fs_remap = new FilesystemRemap();
+			}
 			char * next_dir;
 			while ( (next_dir=mount_list.next()) ) {
 				if (!*next_dir) {

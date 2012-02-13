@@ -1888,14 +1888,16 @@ but across all users and user's jobs.
 
 \label{param:EventLogJobAdInformationAttrs}
 \item[\Macro{EVENT\_LOG\_JOB\_AD\_INFORMATION\_ATTRS}]
-  A comma-separated list of job ClassAd attributes,
-  whose evaluated values form a new event, the JobAdInformationEvent.
+  A comma separated list of job ClassAd attributes,
+  whose evaluated values form a new event, the \Expr{JobAdInformationEvent},
+  given Event Number 028.
   This new event is placed in the event log in addition to each logged event.
-  If \MacroNI{EVENT\_LOG} is not defined, this parameter has no effect.
-  This configuration setting is the same as the job ad attribute
+  If \MacroNI{EVENT\_LOG} is not defined, this configuration variable
+  has no effect.
+  This configuration variable is the same as the job ClassAd attribute
   \AdAttr{JobAdInformationAttrs} (see
-  page~\pageref{JobAdInformationAttrs-job-attribute}) but it applies to
-  the system event log rather than the user log.
+  page~\pageref{JobAdInformationAttrs-job-attribute}),
+  but it applies to the system Event Log rather than the user job log.
 
 \end{description}
 
@@ -7182,10 +7184,10 @@ Configuration File Macros}
   regarding privilege separation). This means that the \Condor{procd}
   does not include the normal Condor logging subsystem, and thus 
   multiple debug levels are not supported.
-  \MacroNI{PROCD\_LOG} is not set by default and
-  is only intended to debug problems should they arise. Note, however,
-  that enabling \Dflag{PROCFAMILY} in the debug level for any other
-  daemon will cause it to log all interactions with the \Condor{procd}.
+  \MacroNI{PROCD\_LOG} defaults to \File{\$(LOG)/ProcLog}.
+  Note that enabling \Dflag{PROCFAMILY} in the debug level for any
+  other daemon will cause it to log all interactions with the
+  \Condor{procd}.
 
 
 \label{param:MaxProcdLog}
@@ -7238,6 +7240,15 @@ Configuration File Macros}
   use by the \Condor{procd} in tracking processes associated with a job.
   See section~\ref{sec:GroupTracking} on page~\pageref{sec:GroupTracking} for 
   a detailed description.
+
+\label{param:BaseCgroup}
+\item[\Macro{BASE\_CGROUP}]
+  The path to the directory used as the virtual file system for the
+  implementation of Linux kernel cgroups.
+  This variable has no default value,
+  and if not defined, cgroup tracking will not be used.
+  See section~\ref{sec:CGroupTracking} on page~\pageref{sec:CGroupTracking} for 
+  a description of cgroup-based process tracking.
 
 \end{description}
 
@@ -7298,6 +7309,13 @@ These macros affect the \Condor{gridmanager}.
   The number of seconds
   between checks for an updated X509 proxy credential. The default
   is 10 minutes (600 seconds).
+
+\label{param:GridmanagerProxyRefreshTime}
+\item[\Macro{GRIDMANAGER\_PROXY\_REFRESH\_TIME}]
+  For GRAM jobs, the \Condor{gridmanager} will not forward a refreshed
+  proxy until the lifetime left for the proxy on the remote machine
+  falls below this value.
+  The value is in seconds and the default is 21600 (6 hours).
 
 \label{param:GridmanagerMinimumProxyTime}
 \item[\Macro{GRIDMANAGER\_MINIMUM\_PROXY\_TIME}]
@@ -7390,13 +7408,6 @@ These macros affect the \Condor{gridmanager}.
   or if some globus-job-managers take a few extra seconds to exit.
   The value 0 means there is no limit. The default value is 10.
 
-\label{param:GridmanagerMaxWsDestroysPerResource}
-\item[\Macro{GRIDMANAGER\_MAX\_WS\_DESTROYS\_PER\_RESOURCE}]
-  For grid jobs of type \SubmitCmd{gt4}, limits the number of destroy
-  commands that the \Condor{gridmanager} will issue at a time to each
-  WS GRAM server. Too many destroy commands can have severe effects on
-  the server. The default value is 5.
-
 \label{param:Gahp}
 \item[\Macro{GAHP}]
   The full path to the binary of the GAHP server.
@@ -7472,13 +7483,6 @@ These macros affect the \Condor{gridmanager}.
   Beware that identifying a \Expr{gt2} server as \Expr{gt5} can result in
   overloading the server, if a large number of jobs are submitted.
 
-\label{param:GridftpUrlBase} 
-\item[\Macro{GRIDFTP\_URL\_BASE}]
-  Specifies an existing \Prog{GridFTP} server on the local system to be used for
-  file transfers for gt4 grid universe jobs. The value is given as the base
-  of a URL, such as \Expr{gsiftp://mycomp.foo.edu:2118}. The default is for
-  Condor to launch temporary \Prog{GridFTP} servers as needed for file transfer.
-
 \label{param:CGAHPLog}
 \item[\Macro{C\_GAHP\_LOG}]
   The complete path and file name of the Condor GAHP server's log.
@@ -7530,13 +7534,6 @@ These macros affect the \Condor{gridmanager}.
   There is no default value. The expected location as given
   in the example configuration is \File{\MacroUNI{SBIN}/gahp\_server}.
 
-\label{param:GT4GAHP}
-\item[\Macro{GT4\_GAHP}]
-  The complete path and file name of the
-  wrapper script that invokes the GT4 GAHP executable.
-  There is no default value. The expected location as given
-  in the example configuration is \File{\MacroUNI{SBIN}/gt4\_gahp}.
-
 \label{param:PBSGAHP}
 \item[\Macro{PBS\_GAHP}]
   The complete path and file name of the PBS GAHP executable.
@@ -7578,6 +7575,13 @@ These macros affect the \Condor{gridmanager}.
   There is no default value.
   The expected location as given in the example configuration is
   \File{\MacroUNI{SBIN}/deltacloud\_gahp}.
+
+\label{param:SGEGAHP}
+\item[\Macro{SGE\_GAHP}]
+  The complete path and file name of the SGE GAHP executable.
+  There is no default value.
+  The expected location as given in the example configuration is
+  \File{\MacroUNI{GLITE\_LOCATION}/bin/batch\_gahp}.
 
 \end{description}
 
