@@ -17,7 +17,8 @@
 
 #include "network_manipulation.h"
 
-static int handle_match(const unsigned char * rule_name, long long bytes_matched) {
+int handle_match(const unsigned char * rule_name, long long bytes_matched, void * unused) {
+        if (unused) {}
         printf("Network%s: %lld\n", rule_name, bytes_matched);
 	return 0;
 }
@@ -237,7 +238,9 @@ finalize_child:
 	if (sock >= 0) {
 		close(sock);
 	}
-	write(info->c2p[1], &rc, sizeof(int));
+	if (write(info->c2p[1], &rc, sizeof(int)) < 0) {
+		fprintf(stderr, "Error writing result: %s (errno=%d)\n", strerror(errno), errno);
+	}
 	close(info->c2p[0]);
 	close(info->p2c[0]);
 	_exit(rc);
@@ -319,10 +322,17 @@ int main(int argc, char * argv[]) {
 
 	if ((rc = set_netns(sock, veth1, fork_pid))) {
 		fprintf(stderr, "Failed to set ns\n");
-		write(p2c[1], &rc, sizeof(int));
+		if (write(p2c[1], &rc, sizeof(int)) < 0) {
+			fprintf(stderr, "Failed to write exitcode.\n");
+			rc = errno;
+		}
 		goto finalize;
 	}
-	write(p2c[1], &rc, sizeof(int));
+	if (write(p2c[1], &rc, sizeof(int)) < 0) {
+		fprintf(stderr, "Failed to write exit.\n");
+		rc = errno;
+		goto finalize;
+	}
 	close(p2c[1]); p2c[1] = -1;
 
 	if ((rc = read(c2p[0], &child_status, sizeof(int))) == sizeof(int)) {
