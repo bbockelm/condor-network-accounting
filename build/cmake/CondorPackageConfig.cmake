@@ -22,7 +22,7 @@
 ##
 ## Start with the common section.
 ##################################################################
-set (PACKAGE_REVISION "1")
+set (PACKAGE_REVISION "${BUILDID}")
 set (CPACK_PACKAGE_NAME ${PACKAGE_NAME})
 set (CPACK_PACKAGE_VENDOR "Condor Team - University of Wisconsin Madison")
 set (CPACK_PACKAGE_VERSION ${PACKAGE_VERSION})
@@ -261,7 +261,7 @@ elseif( ${OS_NAME} STREQUAL "LINUX" AND CONDOR_PACKAGE_BUILD )
 	# it's a smaller subset easier to differentiate.
 	# check the operating system name
 
-	if ( ${LINUX_NAME} STREQUAL  "Debian" )
+	if ( DEB_SYSTEM_NAME )
 
 		message (STATUS "Configuring for Debian package on ${LINUX_NAME}-${LINUX_VER}-${DEBIAN_CODENAME}-${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}")
 

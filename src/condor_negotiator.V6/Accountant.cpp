@@ -1412,7 +1412,7 @@ int Accountant::CheckClaimedOrMatched(ClassAd* ResourceAd, const MyString& Custo
   }
 
   if (CustomerName!=MyString(RemoteUser)) {
-    if(DebugFlags & D_ACCOUNTANT) {
+    if(IsDebugLevel(D_ACCOUNTANT)) {
       char *PreemptingUser = NULL;
       if(ResourceAd->LookupString(ATTR_PREEMPTING_ACCOUNTING_GROUP, &PreemptingUser) ||
          ResourceAd->LookupString(ATTR_PREEMPTING_USER, &PreemptingUser))
@@ -1650,9 +1650,15 @@ double Accountant::GetLimit(const MyString& limit)
 
 double Accountant::GetLimitMax(const MyString& limit)
 {
-	return param_double((limit + "_LIMIT").Value(),
-						 param_double("CONCURRENCY_LIMIT_DEFAULT",
-									   2308032));
+    double deflim = param_double("CONCURRENCY_LIMIT_DEFAULT", 2308032);
+    string lim(limit.Value());
+    string::size_type pos = lim.find_last_of('.');
+    if (pos != string::npos) {
+        string scopedef("CONCURRENCY_LIMIT_DEFAULT_");
+        scopedef += lim.substr(0,pos);
+        deflim = param_double(scopedef.c_str(), deflim);
+    }
+	return param_double((limit + "_LIMIT").Value(), deflim);
 }
 
 void Accountant::DumpLimits()
@@ -1667,13 +1673,18 @@ void Accountant::DumpLimits()
 
 void Accountant::ReportLimits(AttrList *attrList)
 {
-	MyString attr;
 	MyString limit;
  	double count;
 	concurrencyLimits.startIterations();
 	while (concurrencyLimits.iterate(limit, count)) {
-		attr.sprintf("ConcurrencyLimit_%s = %f\n", limit.Value(), count);
-		attrList->Insert(attr.Value());
+        string attr;
+        sprintf(attr, "ConcurrencyLimit_%s", limit.Value());
+        // classad wire protocol doesn't currently support attribute names that include
+        // punctuation or symbols outside of '_'.  If we want to include '.' or any other
+        // punct, we need to either model these as string values, or add support for quoted
+        // attribute names in wire protocol:
+        std::replace(attr.begin(), attr.end(), '.', '_');
+        attrList->Assign(attr.c_str(), count);
 	}
 }
 

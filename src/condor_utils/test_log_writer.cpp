@@ -370,7 +370,7 @@ main(int argc, const char **argv)
 		// Set up the dprintf stuff...
 	Termlog = true;
 	dprintf_config("test_log_writer", get_param_functions());
-	DebugFlags = D_ALWAYS;
+	set_debug_flags(NULL, D_ALWAYS);
 
 	bool			error = false;
 	GlobalOptions	opts;
@@ -595,7 +595,7 @@ GlobalOptions::parseArgs( int argc, const char **argv )
 			if ( arg.hasOpt() ) {
 				const char	*flags;
 				arg.getOpt( flags );
-				set_debug_flags( const_cast<char *>(flags) );
+				set_debug_flags( const_cast<char *>(flags), 0 );
 			} else {
 				fprintf(stderr, "Value needed for '%s'\n", arg.Arg() );
 				printf("%s", usage);
@@ -1567,7 +1567,8 @@ EventInfo::GenEventImageSize( void )
 {
 	SetName( "Job Image Size" );
 	JobImageSizeEvent *e = new JobImageSizeEvent;
-	e->size = GetSize( );
+	e->image_size_kb = GetSize( );
+	e->memory_usage_mb = (GetSize() + 1023) / 1024;
 
 	return SetEvent( e );
 }

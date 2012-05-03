@@ -40,6 +40,9 @@
 // axis includes
 #include "axutil_date_time.h"
 
+// c++ includes
+#include <algorithm>
+
 using namespace std;
 using namespace AviaryQuery;
 using namespace AviaryCommon;
@@ -204,7 +207,6 @@ GetSubmissionSummaryResponse* AviaryQueryServiceSkeleton::getSubmissionSummary(w
 {
 	GetSubmissionSummaryResponse* getSummaryResponse = new GetSubmissionSummaryResponse;
 
-	SubmissionCollectionType::const_iterator element = g_submissions.begin();
 	SubmissionSummaryCollection* submissions = new SubmissionSummaryCollection;
 
 	SubmissionCollectionType sub_map;
@@ -219,16 +221,37 @@ GetSubmissionSummaryResponse* AviaryQueryServiceSkeleton::getSubmissionSummary(w
 		// fast track...client has supplied ids to scan
 		SubmissionIdCollection* id_list = _getSubmissionSummary->getIds();
 		for (SubmissionIdCollection::iterator sic_it = id_list->begin(); id_list->end() != sic_it; sic_it++) {
-			const char* sid_str = (*sic_it)->getName().c_str();
-			SubmissionCollectionType::iterator sct_it = g_submissions.find(sid_str);
-			if (sct_it != g_submissions.end()) {
-				sub_map[(*sct_it).first] = (*sct_it).second;
-			}
-			else {
-				// mark this as not matched when returning our results
-				sub_map[(*sct_it).first] = NULL;
-			}
-		}
+            string sid_name;
+            string sid_owner;
+            if (!(*sic_it)->isNameNil()) {
+                sid_name = (*sic_it)->getName();
+            }
+            if (!(*sic_it)->isOwnerNil()) {
+                sid_owner = (*sic_it)->getOwner();
+            }
+            // kind of xor, doesn't make sense to look for owner if we know the name
+            if (!sid_name.empty()) {
+                SubmissionCollectionType::iterator sct_it = g_submissions.find(sid_name.c_str());
+                if (sct_it != g_submissions.end()) {
+                    sub_map[(*sct_it).first] = (*sct_it).second;
+                }
+                else {
+                    // mark this as not matched when returning our results
+                    sub_map[(*sct_it).first] = NULL;
+                }
+            }
+            else if (!sid_owner.empty()) {
+                for (SubmissionCollectionType::iterator i = g_submissions.begin(); g_submissions.end() != i; i++) {
+                    if (0==strcmp(sid_owner.c_str(),(*i).second->getOwner())) {
+                        sub_map[(*i).first] = (*i).second;
+                    }
+                }
+                if (sub_map.empty()) {
+                    // no results for that owner
+                    sub_map[sid_owner.c_str()] = NULL;
+                }
+            }
+        }
 	}
 
 	for (SubmissionCollectionType::iterator i = sub_map.begin(); sub_map.end() != i; i++) {
@@ -239,9 +262,8 @@ GetSubmissionSummaryResponse* AviaryQueryServiceSkeleton::getSubmissionSummary(w
 			SubmissionID* sid = new SubmissionID;
 			sid->setName(submission->getName());
 			sid->setOwner(submission->getOwner());
+			sid->setQdate(submission->getOldest());
 			summary->setId(sid);
-			// TODO: fully implement getOldest
-			summary->setQdate(submission->getOldest());
 			summary->setCompleted(submission->getCompleted().size());
 			summary->setHeld(submission->getHeld().size());
 			summary->setIdle(submission->getIdle().size());
@@ -331,7 +353,7 @@ GetJobStatusResponse* AviaryQueryServiceSkeleton::getJobStatus(wso2wsf::MessageC
     return jobStatusResponse;
 }
 
-GetJobSummaryResponse* AviaryQueryServiceSkeleton::getJobSummary(wso2wsf::MessageContext *outCtx ,AviaryQuery::GetJobSummary* _getJobSummary)
+GetJobSummaryResponse* AviaryQueryServiceSkeleton::getJobSummary(wso2wsf::MessageContext* /*outCtx*/ ,AviaryQuery::GetJobSummary* _getJobSummary)
 {
 	GetJobSummaryResponse* jobSummaryResponse = new GetJobSummaryResponse;
 	JobServerObject* jso = JobServerObject::getInstance();
@@ -421,8 +443,8 @@ GetJobDetailsResponse* AviaryQueryServiceSkeleton::getJobDetails(wso2wsf::Messag
 		}
 		job_results->push_back(jd);
 
-        for (aviary::codec::AttributeMapType::iterator i = attr_map.begin();attr_map.end() != i; i++) {
-            delete (*i).second;
+        for (aviary::codec::AttributeMapType::iterator it = attr_map.begin();attr_map.end() != it; it++) {
+            delete (*it).second;
         }
 	}
 
@@ -479,5 +501,102 @@ GetJobDataResponse* AviaryQueryServiceSkeleton::getJobData(wso2wsf::MessageConte
 	}
 
     return jobDataResponse;
+}
+
+SubmissionID* makeSubmissionID(SubmissionObject* obj) {
+  SubmissionID* sub_id = new SubmissionID;
+  sub_id->setName(obj->getName());
+  sub_id->setOwner(obj->getOwner());
+  sub_id->setQdate(obj->getOldest());
+  return sub_id;
+}
+
+bool qdateCompare(SubmissionIndexType::value_type& x, SubmissionIndexType::value_type& y) {
+  return x.first <= y.first;
+}
+
+GetSubmissionIDResponse* AviaryQueryServiceSkeleton::getSubmissionID(wso2wsf::MessageContext* /*outCtx*/ ,GetSubmissionID* _getSubmissionID)
+{
+    GetSubmissionIDResponse* response = new GetSubmissionIDResponse;
+    SubmissionID* offset = NULL;
+    ScanMode* mode = NULL;
+    
+    int size = _getSubmissionID->getSize();
+    bool scan_back = false;
+
+    if (!_getSubmissionID->isOffsetNil()) {
+        offset = _getSubmissionID->getOffset();
+    }
+    
+    if (!_getSubmissionID->isModeNil()) {
+        mode = _getSubmissionID->getMode();
+    }
+
+    // see if we are scanning using a qdate index
+    if (!_getSubmissionID->isModeNil()) {
+        SubmissionIndexType::iterator it, start, last;
+        int i=0;
+
+        scan_back = mode->getScanModeEnum() == ScanMode_BEFORE;
+
+        if (scan_back) {
+            if (offset) {
+                start = max_element(
+                            g_qdate_submissions.begin(),
+                            g_qdate_submissions.upper_bound(
+                                offset->getQdate()
+                            ),
+                            qdateCompare
+                        );
+            }
+            else {
+                start = g_qdate_submissions.end();
+            }
+            it=start;
+            do {
+                response->addIds(makeSubmissionID((*it).second));
+                i++;
+                last = it;
+            }
+            while (g_qdate_submissions.begin()!=it-- && i<size);
+            response->setRemaining(distance(g_qdate_submissions.begin(),last));
+        }
+        else {
+            if (offset) {
+                start = g_qdate_submissions.upper_bound(offset->getQdate());
+            }
+            else {
+                start = g_qdate_submissions.begin();
+            }
+            for (it=start; it!=g_qdate_submissions.end() && i<size; it++) {
+                response->addIds(makeSubmissionID((*it).second));
+                i++;
+            }
+            response->setRemaining(distance(it,g_qdate_submissions.end()));
+        }
+
+        return response;
+    }
+    
+    // otherwise it is a lexical scan of the submissions
+    SubmissionCollectionType::iterator it,start;
+    if (offset) {
+        start = g_submissions.find(offset->getName().c_str());
+    }
+    else {
+        start = g_submissions.begin();
+    }
+    
+    // bi-directional iterator
+    int i=0;
+    for (it=start; it!=g_submissions.end() && i<size; it++)
+    {
+        response->addIds(makeSubmissionID((*it).second));
+        i++;
+    }
+    
+    response->setRemaining(distance(it,g_submissions.end()));
+    
+    return response;
 }
 

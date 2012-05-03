@@ -109,7 +109,7 @@ Condor::DebugLevel(5);
 #select(STDERR); $| = 1;
 #select(STDOUT); $| = 1;
 
-my $time = strftime("%y/%m/%d %H:%M:%S", localtime);
+my $time = strftime("%Y/%m/%d %H:%M:%S", localtime);
 print "$time: batch_test.pl starting up ($^O perl)\n";
 
 my $iswindows = CondorUtils::is_windows();
@@ -1047,6 +1047,9 @@ sub CreateLocalConfig
 
 	print FIX "MAX_MASTER_LOG          = $logsize\n";
 	print FIX "MASTER_DEBUG            = D_COMMAND\n";
+
+	print FIX "EVENT_LOG               = \$(LOG)/EventLog\n";
+	print FIX "EVENT_LOG_MAX_SIZE      = $logsize\n";
 
 	if($iswindows == 1) {
 		print FIX "WINDOWS_SOFTKILL_LOG = \$(LOG)\\SoftKillLog\n";

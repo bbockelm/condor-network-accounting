@@ -859,9 +859,9 @@ static bool test_lookup_expr_error_or_false() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "E";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -886,9 +886,9 @@ static bool test_lookup_expr_error_and() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "L";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -913,9 +913,9 @@ static bool test_lookup_expr_error_and_true() {
 	classad.initFromString(classad_string, NULL);
 	const char* attribute_name = "M";
 	ExprTree * tree = classad.LookupExpr(attribute_name);
-	EvalResult val;
-	int actual1 = EvalExprTree(tree, &classad, NULL, &val);
-	int actual2 = (val.type == LX_ERROR);
+	classad::Value val;
+	int actual1 = EvalExprTree(tree, &classad, NULL, val);
+	int actual2 = (val.GetType() == classad::Value::ERROR_VALUE);
 	int expect = 1;
 	emit_input_header();
 	emit_param("ClassAd", classad_string);
@@ -6941,11 +6941,11 @@ static bool test_stringlist_regexp_member_error_option() {
 
 static bool test_random_different() {
 	emit_test("Test that EvalInteger() sets the correct actual for an "
-		"attribute using random(), in particular check that it generates "
+		"attribute using random(256), in particular check that it generates "
 		"different numbers.");
 	emit_comment("This test will fail if random() generates the same number "
 		"10 times in a row, although this is highly unlikely.");
-	const char* classad_string = "\tA1 = random()";
+	const char* classad_string = "\tA1 = random(256)";
 	compat_classad::ClassAd classad;
 	classad.initFromString(classad_string, NULL);
 	int actual = -1, expect = -2, i;

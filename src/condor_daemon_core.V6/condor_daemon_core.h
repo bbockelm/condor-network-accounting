@@ -292,6 +292,7 @@ class DaemonCore : public Service
   friend unsigned pidWatcherThread(void*);
 #endif
   friend int dc_main(int, char**);
+  friend class DaemonCommandProtocol;
     
   public:
     
@@ -485,6 +486,22 @@ class DaemonCore : public Service
     int InServiceCommandSocket() {
         return inServiceCommandSocket_flag;
     }
+    
+    void SetDelayReconfig(bool value) {
+        m_delay_reconfig = value;
+    }
+
+    bool GetDelayReconfig() const {
+        return m_delay_reconfig;
+    }
+
+    void SetNeedReconfig(bool value) {
+        m_need_reconfig = value;
+    }
+
+    bool GetNeedReconfig() const {
+        return m_need_reconfig;
+    }   
 	//@}
     
 
@@ -1910,7 +1927,8 @@ class DaemonCore : public Service
 	int GetRegisteredSocketIndex( Stream *sock );
 
     int inServiceCommandSocket_flag;
-        
+    bool m_need_reconfig;
+    bool m_delay_reconfig;
 #ifndef WIN32
     static char **ParseArgsString(const char *env);
 #endif
@@ -2007,7 +2025,7 @@ public:
 		   a normal "exit".  If the exec() fails, the normal exit() will
 		   occur.
 */
-extern void DC_Exit( int status, const char *shutdown_program = NULL );
+extern PREFAST_NORETURN void DC_Exit( int status, const char *shutdown_program = NULL );
 
 /** Call this function (inside your main_pre_dc_init() function) to
     bypass the authorization initialization in daemoncore.  This is for
@@ -2023,11 +2041,15 @@ extern void DC_Skip_Auth_Init();
 */
 extern void DC_Skip_Core_Init();
 
+
+extern void dc_reconfig();
+
 /** The main DaemonCore object.  This pointer will be automatically instatiated
     for you.  A perfect place to use it would be in your main_init, to access
     Daemon Core's wonderful services, like <tt>Register_Signal()</tt> or
     <tt>Register_Timer()</tt>.
 */
+
 extern DaemonCore* daemonCore;
 #endif
 

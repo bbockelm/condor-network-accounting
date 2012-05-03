@@ -240,6 +240,11 @@ MAIN( int argc, char *argv[], char **envp )
 	user_argv[0] = argv[0];
 	user_argc = 1;
 
+	/* unless the command line arguments say otherwise...assume that we can't
+		change the working directory when performing standalone
+		checkpointing */
+	init_image_relocatable(FALSE);
+
 		/* Default checkpoint file is argv[0].ckpt */
 	ckpt_file = (char *)malloc(strlen(argv[0])+6);
 	sprintf(ckpt_file,"%s.ckpt",argv[0]);
@@ -358,7 +363,7 @@ MAIN( int argc, char *argv[], char **envp )
 			  -Derek Wright 9/29/99
 			*/
 		if( (strncmp(arg, "D_", 2) == MATCH) ) {
-			_condor_set_debug_flags( arg );
+			_condor_set_debug_flags( arg, 0 );
 			continue;
 		}
 
@@ -403,7 +408,7 @@ MAIN( int argc, char *argv[], char **envp )
 			   -Derek Wright 9/30/99
 			 */
 		if( (strncmp(arg, "D_", 2) == MATCH) ) {
-			_condor_set_debug_flags( arg );
+			_condor_set_debug_flags( arg, 0 );
 			continue;
 		}
 
@@ -415,6 +420,11 @@ MAIN( int argc, char *argv[], char **envp )
 
 		if( (strcmp(arg, "aggravate_bugs")) == MATCH ) {
 			_condor_file_table_aggravate(1);
+			continue;
+		}
+
+		if( (strcmp(arg, "relocatable")) == MATCH ) {
+		init_image_relocatable(TRUE);
 			continue;
 		}
 
@@ -470,6 +480,11 @@ MAIN( int argc, char *argv[], char **envp )
 		scm = SetSyscalls( SYS_LOCAL|SYS_UNMAPPED );
 		wd = getwd(0);
 		SetSyscalls( SYS_LOCAL|SYS_MAPPED );
+		/* we can let this work so the file table can find the initial 
+			checkpoint, but if we are performing relocatable 
+			standalone resumption, then after we restore the segments we'll 
+			update the filteable by hand with this new wd instead of the
+			previous one brought in from the checkpoint image. */
 		chdir( wd );
 		SetSyscalls( scm );
 
@@ -478,6 +493,7 @@ MAIN( int argc, char *argv[], char **envp )
 		_linked_with_condor_message();
 
 		init_image_with_file_name( ckpt_file );
+		init_image_with_iwd(wd);
 
 		if( should_restart ) {
 			_condor_warning(CONDOR_WARNING_KIND_NOTICE,"Will restart from %s",ckpt_file);
@@ -863,10 +879,10 @@ get_ckpt_name()
 void
 _condor_setup_dprintf()
 {
-	if( ! DebugFlags ) {
+	if( ! IsDebugLevel(D_ALWAYS) ) {
 			// If it hasn't already been set, give a default, so we
 			// still get dprintf() if we're running in Condor.
-		DebugFlags = D_ALWAYS | D_NOHEADER;
+		_condor_set_debug_flags( NULL, D_ALWAYS | D_NOHEADER);
 	}
 
 		// Now, initialize what FD we print to.  If we got to this

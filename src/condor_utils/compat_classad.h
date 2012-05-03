@@ -26,6 +26,20 @@
 class StringList;
 class Stream;
 
+// hopefully this can go away when classads has native support for 64bit int
+// in the mean time, we want to do the conversion as close to the classad api
+// as possible.
+#ifndef classad_int64
+# ifdef WIN32
+# define classad_int64 __int64
+# elif defined(__x86_64__) && ! defined(Darwin)
+# define classad_int64_is_long
+# define classad_int64 long
+# else
+# define classad_int64 long long
+# endif
+#endif
+
 #ifndef TRUE
 #define TRUE  1
 #endif
@@ -44,89 +58,6 @@ typedef enum {
 	TargetJobAttrs,
 	TargetScheddAttrs
 } TargetAdType;
-
-// This enum is lifted directly from old ClassAds.
-typedef enum
-{
-  // Literals
-  LX_VARIABLE,
-  LX_INTEGER,
-  LX_FLOAT,
-  LX_STRING,
-  LX_BOOL,
-  LX_NULL,
-  LX_UNDEFINED,
-  LX_ERROR,
-
-  // Operators
-  LX_ASSIGN,
-  LX_AGGADD,
-  LX_AGGEQ,
-  LX_AND,
-  LX_OR,
-  LX_LPAREN,
-  LX_RPAREN,
-  LX_MACRO,
-  LX_META_EQ,
-  LX_META_NEQ,
-  LX_EQ,
-  LX_NEQ,
-  LX_LT,
-  LX_LE,
-  LX_GT,
-  LX_GE,
-  LX_ADD,
-  LX_SUB,
-  LX_MULT,
-  LX_DIV,
-  LX_EOF,
-
-  LX_EXPR,
-
-  LX_TIME,
-
-  LX_FUNCTION,
-  LX_SEMICOLON,
-  LX_COMMA,
-
-  NOT_KEYWORD
-} LexemeType;
-
-// This class is lifted directly from old ClassAds for EvalExprTree()
-class EvalResult
-{
-    public :
-
-    EvalResult();
-  	~EvalResult();
-
-		/// copy constructor
-	EvalResult(const EvalResult & copyfrom);
-		/// assignment operator
-	EvalResult & operator=(const EvalResult & rhs);
-
-		// free storage and reset to undefined value
-	void clear();
-
-	void fPrintResult(FILE *); // for debugging
-
-		/// convert to LX_STRING
-		/// if value is ERROR or UNDEFINED, do not convert unless force=true
-	void toString(bool force=false);
-
-   	union
-    	{
-   	    int i;
-   	    float f;
-   	    char* s;
-        };
-  	LexemeType type;
-
-	bool debug;
-
-	private :
-	void deepcopy(const EvalResult & copyfrom);
-};
 
 class ClassAd : public classad::ClassAd
 {
@@ -191,7 +122,12 @@ class ClassAd : public classad::ClassAd
 	int Assign(char const *name,unsigned int value)
 	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
 
-	int Assign(char const *name,long value)
+#if ! defined classad_int64_is_long
+	int Assign(char const *name,long value) // TJ: fix for int64 classad
+	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
+#endif
+
+	int Assign(char const *name,classad_int64 value) // TJ: fix for int64 classad
 	{ return InsertAttr( name, (int)value) ? TRUE : FALSE; }
 
 	int Assign(char const *name,unsigned long value)
@@ -263,6 +199,13 @@ class ClassAd : public classad::ClassAd
 		 *  @return true if the attribute exists and is a float, false otherwise
 		 */
 
+	int LookupInteger(const char *name, int64_t &value) const;
+		/** Lookup (don't evaluate) an attribute that is a float.
+		 *  @param name The attribute
+		 *  @param value The integer
+		 *  @return true if the attribute exists and is a float, false otherwise
+		 */
+
 	int LookupFloat(const char *name, float &value) const;
 
 		/** Lookup (don't evaluate) an attribute that can be considered a boolean
@@ -324,6 +267,20 @@ class ClassAd : public classad::ClassAd
 		 *  but is not an integer
 		 */
 	int EvalInteger (const char *name, classad::ClassAd *target, int &value);
+	int EvalInteger (const char *name, classad::ClassAd *target, classad_int64 & value) {
+		int ival;
+		int result = EvalInteger(name, target, ival);  // TJ: fix for int64 classad
+		value = ival;
+		return result;
+	}
+#if ! defined classad_int64_is_long
+	int EvalInteger (const char *name, classad::ClassAd *target, long & value) {
+		int ival;
+		int result = EvalInteger(name, target, ival);  // TJ: fix for int64 classad
+		value = ival;
+		return result;
+	}
+#endif
 
 		/** Lookup and evaluate an attribute in the ClassAd that is a float
 		 *  @param name The name of the attribute
@@ -333,7 +290,13 @@ class ClassAd : public classad::ClassAd
 		 *  but is not a float.
 		 */
 
-	int EvalFloat (const char *name, classad::ClassAd *target, float &value);
+	int EvalFloat (const char *name, classad::ClassAd *target, double &value);
+	int EvalFloat (const char *name, classad::ClassAd *target, float &value) {
+		double dval;
+		int result = EvalFloat(name, target, dval);
+		value = dval;
+		return result;
+	}
 
 		/** Lookup and evaluate an attribute in the ClassAd that is a boolean
 		 *  @param name The name of the attribute

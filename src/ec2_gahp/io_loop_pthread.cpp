@@ -138,6 +138,9 @@ registerAllAmazonCommands(void)
 	 registerAmazonGahpCommand(AMAZON_COMMAND_VM_ATTACH_VOLUME, 
             AmazonAttachVolume::ioCheck, AmazonAttachVolume::workerFunction);
 
+	 registerAmazonGahpCommand(AMAZON_COMMAND_VM_CREATE_TAGS, 
+            AmazonCreateTags::ioCheck, AmazonCreateTags::workerFunction);
+
     //registerAmazonGahpCommand(AMAZON_COMMAND_VM_RELEASE_ADDRESS, 
     //        AmazonReleaseAddress::ioCheck, AmazonReleaseAddress::workerFunction);
 
@@ -223,7 +226,7 @@ main( int argc, char ** const argv )
     dprintf_config( "EC2_GAHP", get_param_functions() );
     const char * debug_string = getenv( "DebugLevel" );
     if( debug_string && * debug_string ) {
-        set_debug_flags( debug_string );
+        set_debug_flags( debug_string, 0 );
     }
 
 	int min_workers = MIN_NUMBER_WORKERS;
@@ -237,7 +240,7 @@ main( int argc, char ** const argv )
 			case 'd':
 				// Debug Level
 				if( my_optarg && *my_optarg ) {
-					set_debug_flags(my_optarg);
+					set_debug_flags(my_optarg, 0);
 				}
 				break;
 			case 'w':

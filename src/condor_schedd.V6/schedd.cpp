@@ -192,11 +192,12 @@ UserIdentity::UserIdentity(const char *user, const char *domainname,
 	m_auxid("")
 {
 	ExprTree *tree = const_cast<ExprTree *>(scheduler.getGridParsedSelectionExpr());
-	EvalResult val;
+	classad::Value val;
+	const char *str;
 	if ( ad && tree && 
-		 EvalExprTree(tree,ad,NULL,&val) && val.type==LX_STRING && val.s )
+		 EvalExprTree(tree,ad,NULL,val) && val.IsStringValue(str) )
 	{
-		m_auxid = val.s;
+		m_auxid = str;
 	}
 }
 
@@ -221,7 +222,7 @@ match_rec::match_rec( char const* claim_id, char const* p, PROC_ID* job_id,
 	num_exceptions = 0;
 	if( match ) {
 		my_match_ad = new ClassAd( *match );
-		if( DebugFlags & D_MACHINE ) {
+		if( IsDebugLevel(D_MACHINE) ) {
 			dprintf( D_MACHINE, "*** ClassAd of Matched Resource ***\n" );
 			my_match_ad->dPrint( D_MACHINE );
 			dprintf( D_MACHINE | D_NOHEADER, "*** End of ClassAd ***\n" );
@@ -314,7 +315,7 @@ match_rec::makeDescription() {
 	if( m_description.Length() ) {
 		m_description += " ";
 	}
-	if( DebugFlags & D_FULLDEBUG ) {
+	if( IsFulldebug(D_FULLDEBUG) ) {
 		m_description += publicClaimId();
 	}
 	else if( peer ) {
@@ -437,7 +438,7 @@ Scheduler::Scheduler() :
 	m_need_reschedule = false;
 	m_send_reschedule_timer = -1;
 
-    stats.Init();
+	stats.Init(0);
 
 		//
 		// ClassAd attribute for evaluating whether to start
@@ -947,6 +948,13 @@ Scheduler::count_jobs()
 	stats.Tick();
 	stats.JobsSubmitted = GetJobQueuedCount();
 
+	OtherPoolStats.Tick();
+	// because cad is really m_adSchedd which is persistent, we have to 
+	// actively delete expired statistics atributes.
+	OtherPoolStats.UnpublishDisabled(*cad);
+	OtherPoolStats.RemoveDisabled();
+	OtherPoolStats.Publish(*cad);
+
 	// publish scheduler generic statistics
 	stats.Publish(*cad);
 
@@ -1262,6 +1270,18 @@ int Scheduler::make_ad_list(
    stats.JobsSubmitted = GetJobQueuedCount();
    stats.ShadowsRunning = numShadows;
 
+   OtherPoolStats.Tick(now);
+   // because cad is a copy of m_adSchedd which is persistent, we have to 
+   // actively delete expired statistics atributes.
+   OtherPoolStats.UnpublishDisabled(*cad);
+   OtherPoolStats.RemoveDisabled();
+
+   int flags = stats.PublishFlags;
+   if ( ! stats_config.IsEmpty()) {
+      flags = generic_stats_ParseConfigString(stats_config.Value(), "SCHEDD", "SCHEDULER", flags);
+   }
+   OtherPoolStats.Publish(*cad, flags);
+
    // publish scheduler generic statistics
    stats.Publish(*cad, stats_config.Value());
 
@@ -1493,6 +1513,14 @@ count( ClassAd *job )
 	// increment our count of the number of job ads in the queue
 	scheduler.JobsTotalAds++;
 
+	// we don't actually need this for the current set of other_stats
+	//
+	//ScheddOtherStats * other_stats = NULL;
+	//if (scheduler.OtherPoolStats.AnyEnabled()) {
+	//	other_stats = OtherPoolStats.Matches(*job);
+	//}
+	//#define OTHER for (ScheddOtherStats * po = other_stats; po; po = po->next) (po->stats)
+
 	// insert owner even if REMOVED or HELD for condor_q -{global|sub}
 	// this function makes its own copies of the memory passed in 
 	int OwnerNum = scheduler.insert_owner( owner );
@@ -1608,11 +1636,14 @@ count( ClassAd *job )
 		int job_image_size = 0;
 		job->LookupInteger("ImageSize_RAW", job_image_size);
 		scheduler.stats.JobsRunningSizes += (int64_t)job_image_size * 1024;
+		//OTHER.JobsRunningSizes += (int64_t)job_image_size * 1024;
+
 		int job_start_date = 0;
 		int job_running_time = 0;
 		if (job->LookupInteger(ATTR_JOB_START_DATE, job_start_date))
 			job_running_time = (time(NULL) - job_start_date);
 		scheduler.stats.JobsRunningRuntimes += job_running_time;
+		//OTHER.JobsRunningRuntimes += job_running_time;
 	} else if (status == HELD) {
 		scheduler.JobsHeld++;
 		scheduler.Owners[OwnerNum].JobsHeld++;
@@ -1620,6 +1651,7 @@ count( ClassAd *job )
 		scheduler.JobsRemoved++;
 	}
 
+	#undef OTHER
 	return 0;
 }
 
@@ -2239,44 +2271,6 @@ jobCleanupNeedsThread( int /* cluster */, int /* proc */ )
 }
 
 
-/*
-  Return true if we should create/chown the spool directory for this job.
-*/
-bool
-jobIsSandboxed( ClassAd * ad )
-{
-	ASSERT(ad);
-	int stage_in_start = 0;
-	// int never_create_sandbox_expr = 0;
-
-		// Spooled jobs should return true, because they already
-		// have a spool directory, so we need to manage it
-		// (i.e. chown it to the correct user)
-	ad->LookupInteger( ATTR_STAGE_IN_START, stage_in_start );
-	if( stage_in_start > 0 ) {
-		return true;
-	}
-
-	int univ = CONDOR_UNIVERSE_VANILLA;
-	ad->LookupInteger( ATTR_JOB_UNIVERSE, univ );
-
-		// As of 7.5.5, parallel jobs specify JobRequiresSandbox=true,
-		// because they use the spool directory for chirp stuff to make
-		// sshd work.  For backward compatibility with prior releases,
-		// we assume all parallel jobs require this unless they explicitly
-		// specify otherwise.
-	int job_requires_sandbox_expr = 0;
-	bool create_sandbox = univ == CONDOR_UNIVERSE_PARALLEL ? true : false;
-
-	if( ad->EvalBool(ATTR_JOB_REQUIRES_SANDBOX, NULL, job_requires_sandbox_expr) )
-	{
-		create_sandbox = job_requires_sandbox_expr ? true : false;
-	}
-
-	return create_sandbox;
-}
-
-
 bool
 getSandbox( int cluster, int proc, MyString & path )
 {
@@ -2310,7 +2304,7 @@ aboutToSpawnJobHandler( int cluster, int proc, void* )
 
 	ClassAd * job_ad = GetJobAd( cluster, proc );
 	ASSERT( job_ad ); // No job ad?
-	if( ! jobIsSandboxed(job_ad) ) {
+	if( ! SpooledJobFiles::jobRequiresSpoolDirectory(job_ad) ) {
 			// nothing more to do...
 		FreeJobAd( job_ad );
 		return TRUE;
@@ -2423,11 +2417,11 @@ Scheduler::spawnJobHandler( int cluster, int proc, shadow_rec* srec )
 		if (proc > 0) {
 			return true;
 		}
-		ASSERT( srec != NULL );
-			break;
+		break;
 	default:
 		break;
 	}
+	ASSERT( srec != NULL );
 
 		// if we're still here, make sure we have a match since we
 		// have to spawn a shadow...
@@ -2555,40 +2549,8 @@ jobIsFinished( int cluster, int proc, void* )
 
 #ifndef WIN32
 
-	if( jobIsSandboxed(job_ad) ) {
-		MyString sandbox;
-		if( getSandbox(cluster, proc, sandbox) ) {
-			uid_t src_uid = 0;
-			uid_t dst_uid = get_condor_uid();
-			gid_t dst_gid = get_condor_gid();
-
-			MyString jobOwner;
-			job_ad->LookupString( ATTR_OWNER, jobOwner );
-
-			passwd_cache* p_cache = pcache();
-			if( p_cache->get_user_uid( jobOwner.Value(), src_uid ) ) {
-				if( ! recursive_chown(sandbox.Value(), src_uid,
-									  dst_uid, dst_gid, true) )
-				{
-					dprintf( D_FULLDEBUG, "(%d.%d) Failed to chown %s from "
-							 "%d to %d.%d.  User may run into permissions "
-							 "problems when fetching sandbox.\n", 
-							 cluster, proc, sandbox.Value(),
-							 src_uid, dst_uid, dst_gid );
-				}
-			} else {
-				dprintf( D_ALWAYS, "(%d.%d) Failed to find UID and GID "
-						 "for user %s.  Cannot chown \"%s\".  User may "
-						 "run into permissions problems when fetching "
-						 "job sandbox.\n", cluster, proc, jobOwner.Value(),
-						 sandbox.Value() );
-			}
-		} else {
-			dprintf( D_ALWAYS, "(%d.%d) Failed to find sandbox for this "
-					 "job.  Cannot chown sandbox to user.  User may run "
-					 "into permissions problems when fetching sandbox.\n",
-					 cluster, proc );
-		}
+	if( SpooledJobFiles::jobRequiresSpoolDirectory(job_ad) ) {
+		SpooledJobFiles::chownSpoolDirectoryToCondor(job_ad);
 	}
 
 #else	/* WIN32 */
@@ -3561,6 +3523,7 @@ Scheduler::spoolJobFiles(int mode, Stream* s)
 		// will free 'peer_version' and our reaper will free 'jobs' (the
 		// reaper needs 'jobs' for some of its work).
 	job_data_transfer_t *thread_arg = (job_data_transfer_t *)malloc( sizeof(job_data_transfer_t) );
+	ASSERT( thread_arg != NULL );
 	thread_arg->mode = mode;
 	thread_arg->peer_version = peer_version;
 	thread_arg->jobs = jobs;
@@ -4556,6 +4519,17 @@ Scheduler::actOnJobMyselfHandler( ServiceData* data )
 					 "Failed to write abort event to the user log\n" ); 
 		}
 		DestroyProc( job_id.cluster, job_id.proc );
+
+		shadow_rec * srec = scheduler.FindSrecByProcID(job_id);
+		if(srec == NULL) {
+			dprintf( D_FULLDEBUG, "(%d.%d) Shadow already gone\n", 
+				(int) job_id.cluster, (int)job_id.proc);
+		} else {
+			dprintf( D_FULLDEBUG, "(%d.%d) Killing shadow %d\n", 
+				(int) job_id.cluster, (int)job_id.proc, (int)(srec->pid));
+			scheduler.sendSignalToShadow(srec->pid, SIGKILL, job_id);
+		}
+
 		break;
     }
 	case JA_CLEAR_DIRTY_JOB_ATTRS:
@@ -5419,6 +5393,14 @@ Scheduler::contactStartd( ContactStartdArgs* args )
 		DelMrec ( mrec );
 		return;
 	}
+
+    // some attributes coming out of negotiator's matching process that need to
+    // make a subway transfer from slot/match ad to job/request ad, on their way
+    // to the claim, and then eventually back around to the negotiator for use in
+    // preemption policies:
+    jobAd->CopyAttribute(ATTR_REMOTE_GROUP, mrec->my_match_ad);
+    jobAd->CopyAttribute(ATTR_REMOTE_NEGOTIATING_GROUP, mrec->my_match_ad);
+    jobAd->CopyAttribute(ATTR_REMOTE_AUTOREGROUP, mrec->my_match_ad);
 
 		// Setup to claim the slot asynchronously
 
@@ -6804,6 +6786,8 @@ Scheduler::spawnShadow( shadow_rec* srec )
     stats.ShadowsStarted += 1;
     stats.ShadowsRunning = numShadows;
 
+	OtherPoolStats.Tick();
+
 		// If this is a reconnect shadow, update the mrec with some
 		// important info.  This usually happens in StartJobs(), but
 		// in the case of reconnect, we don't go through that code. 
@@ -6988,6 +6972,8 @@ Scheduler::spawnJobHandlerRaw( shadow_rec* srec, const char* path,
 	add_shadow_rec( srec );
     stats.Tick();
     stats.ShadowsRunning = numShadows;
+
+	OtherPoolStats.Tick();
 
 		// expand $$ stuff and persist expansions so they can be
 		// retrieved on restart for reconnect
@@ -7316,7 +7302,7 @@ Scheduler::spawnLocalStarter( shadow_rec* srec )
 	starter_args.AppendArg("-schedd-addr");
 	starter_args.AppendArg(MyShadowSockName);
 
-	if(DebugFlags & D_FULLDEBUG) {
+	if(IsFulldebug(D_FULLDEBUG)) {
 		MyString argstring;
 		starter_args.GetArgsStringForDisplay(&argstring);
 		dprintf( D_FULLDEBUG, "About to spawn %s %s\n", 
@@ -7802,7 +7788,7 @@ Scheduler::display_shadow_recs()
 {
 	struct shadow_rec *r;
 
-	if( !(DebugFlags & D_FULLDEBUG) ) {
+	if( !IsFulldebug(D_FULLDEBUG) ) {
 		return; // avoid needless work below
 	}
 
@@ -7895,9 +7881,24 @@ void add_shadow_birthdate(int cluster, int proc, bool is_reconnect)
         int qdate = 0;
         GetAttributeInt(cluster, proc, ATTR_Q_DATE, &qdate);
 
-        scheduler.stats.Tick();
-        scheduler.stats.JobsStarted += 1;
-        scheduler.stats.JobsAccumTimeToStart += (current_time - qdate);
+		scheduler.stats.Tick();
+		scheduler.stats.JobsStarted += 1;
+		scheduler.stats.JobsAccumTimeToStart += (current_time - qdate);
+
+		if (scheduler.OtherPoolStats.AnyEnabled()) {
+
+			ScheddOtherStats * other_stats = NULL;
+			ClassAd * job_ad = GetJobAd(cluster, proc);
+			if (job_ad) {
+				other_stats = scheduler.OtherPoolStats.Matches(*job_ad, now);
+				FreeJobAd(job_ad);
+			}
+			for (ScheddOtherStats * po = other_stats; po; po = po->next) {
+				po->stats.JobsStarted += 1;
+				po->stats.JobsAccumTimeToStart += (current_time - qdate);
+			}
+			scheduler.OtherPoolStats.Tick();
+		}
 	}
 
 	// If we're reconnecting, the old ATTR_JOB_CURRENT_START_DATE is still
@@ -8374,6 +8375,19 @@ Scheduler::delete_shadow_rec( shadow_rec *rec )
 			free( last_host );
 			last_host = NULL;
 		}
+
+        char* last_pool = NULL;
+		GetAttributeStringNew( cluster, proc, ATTR_REMOTE_POOL, &last_pool );
+		if( last_pool ) {
+			SetAttributeString( cluster, proc, ATTR_LAST_REMOTE_POOL,
+								last_pool );
+			free( last_pool );
+			last_pool = NULL;
+		} else {
+            // If RemotePool is not defined, be sure to remove the last remote pool (if it exists)
+             DeleteAttribute( cluster, proc, ATTR_LAST_REMOTE_POOL );
+        }
+
 	}
 
 	if( pid ) {
@@ -9281,8 +9295,22 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 		// update exit code statistics
 	time_t updateTime = time(NULL);
 	stats.Tick(updateTime);
-	stats.JobsExited += 1;
 	stats.JobsSubmitted = GetJobQueuedCount();
+
+	MyString other;
+	ScheddOtherStats * other_stats = NULL;
+	if (OtherPoolStats.AnyEnabled()) {
+		ClassAd * job_ad = GetJobAd( job_id.cluster, job_id.proc );
+		if (job_ad) {
+			other_stats = OtherPoolStats.Matches(*job_ad, updateTime);
+			FreeJobAd(job_ad);
+		}
+		OtherPoolStats.Tick(updateTime);
+	}
+	#define OTHER for (ScheddOtherStats * po = other_stats; po; po = po->next) (po->stats)
+
+	stats.JobsExited += 1;
+	OTHER.JobsExited += 1;
 
 		// get attributes that we will need to update goodput & badput statistics.
 		//
@@ -9297,16 +9325,6 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_DATE, &job_start_date))
 		job_running_time = (updateTime - job_start_date);
 
-	int job_start_exec_date = 0, job_start_xfer_out_date = 0;
-	int job_pre_exec_time = 0, job_post_exec_time = 0;
-	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_EXECUTING_DATE, &job_start_exec_date))
-		job_pre_exec_time = MAX(0, job_start_exec_date - job_start_date);
-	if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, &job_start_xfer_out_date))
-		job_post_exec_time = MAX(0, updateTime - job_start_xfer_out_date);
-
-	stats.JobsAccumPreExecuteTime += job_pre_exec_time;
-	stats.JobsAccumPostExecuteTime += job_post_exec_time;
-	stats.JobsAccumExecuteTime += MAX(0, job_running_time - (job_pre_exec_time + job_post_exec_time));
 
 		// We get the name of the daemon that had a problem for 
 		// nice log messages...
@@ -9332,14 +9350,16 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 	switch( exit_code ) {
 		case JOB_NO_MEM:
 			this->swap_space_exhausted();
-            stats.JobsShadowNoMemory += 1;
+			stats.JobsShadowNoMemory += 1;
+			OTHER.JobsShadowNoMemory += 1;
 
 		case JOB_EXEC_FAILED:
 				//
 				// The calling function will make sure that
 				// we don't try to start new jobs
 				//
-            stats.JobsExecFailed += 1;
+			stats.JobsExecFailed += 1;
+			OTHER.JobsExecFailed += 1;
 			break;
 
 		case JOB_CKPTED:
@@ -9357,11 +9377,13 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
             switch (exit_code) {
                case JOB_CKPTED:
                   stats.JobsCheckpointed += 1;
+                  OTHER.JobsCheckpointed += 1;
                   is_goodput = true;
                   break;
                case JOB_SHOULD_REQUEUE:
                //case JOB_NOT_CKPTED: for CONDOR_UNIVERSE_STANDARD
                   stats.JobsShouldRequeue += 1;
+                  OTHER.JobsShouldRequeue += 1;
                   // for standard universe this is actually case JOB_NOT_CKPTED
                   if (CONDOR_UNIVERSE_STANDARD == universe) {
                      is_badput = true;
@@ -9371,6 +9393,7 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
                   break;
                case JOB_NOT_STARTED:
                   stats.JobsNotStarted += 1;
+                  OTHER.JobsNotStarted += 1;
                   break;
                }
 			break;
@@ -9391,7 +9414,8 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 			if ( srec != NULL ) {
 				srec->removed = true;
 			}
-            stats.JobsShouldRemove += 1;
+			stats.JobsShouldRemove += 1;
+			OTHER.JobsShouldRemove += 1;
 				// no break, fall through and do the action
 
 		case JOB_NO_CKPT_FILE:
@@ -9401,7 +9425,8 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 				set_job_status( job_id.cluster, job_id.proc, REMOVED );
 			}
 			is_badput = true;
-            stats.JobsKilled += 1;
+			stats.JobsKilled += 1;
+			OTHER.JobsKilled += 1;
 			break;
 
 		case JOB_EXITED_AND_CLAIM_CLOSING:
@@ -9410,17 +9435,21 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 				srec->match->needs_release_claim = false;
 				DelMrec(srec->match);
 			}
-            stats.JobsExitedAndClaimClosing += 1;
+			stats.JobsExitedAndClaimClosing += 1;
+			OTHER.JobsExitedAndClaimClosing += 1;
 			// no break, fall through
 		case JOB_EXITED:
 			dprintf(D_FULLDEBUG, "Reaper: JOB_EXITED\n");
 			stats.JobsExitedNormally += 1;
+			OTHER.JobsExitedNormally += 1;
 			stats.JobsCompleted += 1;
+			OTHER.JobsCompleted += 1;
 			is_goodput = true;
 			// no break, fall through and do the action
 		case JOB_COREDUMPED:
 			if (JOB_COREDUMPED == exit_code) {
 				stats.JobsCoredumped += 1;
+				OTHER.JobsCoredumped += 1;
 				is_badput = true;
 			}
 				// If the job isn't being HELD, set it to COMPLETED
@@ -9442,7 +9471,7 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 				// that never started
 				// Andy Pavlo - 01.24.2006 - pavlo@cs.wisc.edu
 				//
-            MyString _error("\"Job missed deferred execution time\"");
+			MyString _error("\"Job missed deferred execution time\"");
 			if ( SetAttribute( job_id.cluster, job_id.proc,
 					  		  ATTR_HOLD_REASON, _error.Value() ) < 0 ) {
 				dprintf( D_ALWAYS, "WARNING: Failed to set %s to %s for "
@@ -9488,8 +9517,10 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 
 			if (JOB_MISSED_DEFERRAL_TIME == exit_code) {
 				stats.JobsMissedDeferralTime += 1;
+				OTHER.JobsMissedDeferralTime += 1;
 			} else {
 				stats.JobsShouldHold += 1;
+				OTHER.JobsShouldHold += 1;
 			}
 			break;
 		}
@@ -9498,7 +9529,8 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 			dprintf( D_ALWAYS,
 					 "ERROR: %s had fatal error writing its log file\n",
 					 daemon_name.Value() );
-            stats.JobsDebugLogError += 1;
+			stats.JobsDebugLogError += 1;
+			OTHER.JobsDebugLogError += 1;
 			// We don't want to break, we want to fall through 
 			// and treat this like a shadow exception for now.
 
@@ -9527,21 +9559,78 @@ Scheduler::jobExitCode( PROC_ID job_id, int exit_code )
 				// make sure we hit it
 			reportException = true;
 			stats.JobsExitException += 1;
+			OTHER.JobsExitException += 1;
 			is_badput = true;
 			break;
 	} // SWITCH
 	
 		// calculate badput and goodput statistics.
 		//
-	if (is_goodput) {
-		stats.JobsAccumRunningTime += job_running_time;
-		stats.JobsCompletedSizes += (int64_t)job_image_size * 1024;
-		stats.JobsCompletedRuntimes += job_running_time;
-	} else if (is_badput) {
-		stats.JobsAccumBadputTime += job_running_time;
-		stats.JobsBadputSizes += (int64_t)job_image_size * 1024;
-		stats.JobsBadputRuntimes += job_running_time;
+	if ( ! is_goodput && ! is_badput) {
+		stats.JobsAccumChurnTime += job_running_time;
+		OTHER.JobsAccumChurnTime += job_running_time;
+	} else {
+		int job_pre_exec_time = 0;  // unless we see job_start_exec_date
+		int job_post_exec_time = 0;
+		int job_executing_time = 0;
+		// this time is set in the shadow (remoteresource::beginExecution) so we don't need to worry
+		// if we are talking to a shadow that supports it. the shadow and schedd should be from the same build.
+		int job_start_exec_date = 0; 
+		if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_EXECUTING_DATE, &job_start_exec_date)) {
+			job_pre_exec_time = MAX(0, job_start_exec_date - job_start_date);
+			job_executing_time = updateTime - job_start_exec_date;
+			if (job_executing_time < 0) {
+				stats.JobsWierdTimestamps += 1;
+				OTHER.JobsWierdTimestamps += 1;
+			}
+		} else if (is_badput) {
+			stats.JobsAccumChurnTime += job_running_time;
+			OTHER.JobsAccumChurnTime += job_running_time;
+		}
+		// this time is also set in the shadow, but there is no gurantee that transfer output ever happened
+		// so it may not exist.
+		int job_start_xfer_out_date = 0;
+		if (0 == GetAttributeInt(job_id.cluster, job_id.proc, ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, &job_start_xfer_out_date)) {
+			job_post_exec_time = MAX(0, updateTime - job_start_xfer_out_date);
+			job_executing_time = job_start_xfer_out_date - job_start_exec_date;
+			if (job_executing_time < 0 || job_executing_time > updateTime) {
+				stats.JobsWierdTimestamps += 1;
+				OTHER.JobsWierdTimestamps += 1;
+			}
+		}
+
+		stats.JobsAccumPreExecuteTime += job_pre_exec_time;
+		stats.JobsAccumPostExecuteTime += job_post_exec_time;
+		stats.JobsAccumExecuteTime += MAX(0, job_executing_time);
+		stats.JobsAccumExecuteAltTime += MAX(0, job_running_time - (job_pre_exec_time + job_post_exec_time));
+
+		if (is_goodput) {
+			stats.JobsAccumRunningTime += job_running_time;
+			stats.JobsCompletedSizes += (int64_t)job_image_size * 1024;
+			stats.JobsCompletedRuntimes += job_running_time;
+		} else if (is_badput) {
+			stats.JobsAccumBadputTime += job_running_time;
+			stats.JobsBadputSizes += (int64_t)job_image_size * 1024;
+			stats.JobsBadputRuntimes += job_running_time;
+		}
+		if (other_stats) {
+			OTHER.JobsAccumPreExecuteTime += job_pre_exec_time;
+			OTHER.JobsAccumPostExecuteTime += job_post_exec_time;
+			OTHER.JobsAccumExecuteTime += MAX(0, job_executing_time);
+			OTHER.JobsAccumExecuteAltTime += MAX(0, job_running_time - (job_pre_exec_time + job_post_exec_time));
+			if (is_goodput) {
+				OTHER.JobsAccumRunningTime += job_running_time;
+				OTHER.JobsCompletedSizes += (int64_t)job_image_size * 1024;
+				OTHER.JobsCompletedRuntimes += job_running_time;
+			} else if (is_badput) {
+				OTHER.JobsAccumBadputTime += job_running_time;
+				OTHER.JobsBadputSizes += (int64_t)job_image_size * 1024;
+				OTHER.JobsBadputRuntimes += job_running_time;
+			}
+		}
 	}
+
+#undef OTHER
 
 		// Report the ShadowException
 		// This used to be in the default case in the switch statement
@@ -10250,6 +10339,66 @@ Scheduler::Init()
 	}
 	if (flock_collector_hosts) free(flock_collector_hosts);
 	if (flock_negotiator_hosts) free(flock_negotiator_hosts);
+
+	// fetch all params that start with SCHEDD_COLLECT_STATS_FOR_ and
+	// use them to define other scheduler stats pools.  the value of this
+	// param should be a classad expression that evaluates agains the job ad
+	// to a boolean.
+	//
+	{
+		Regex re; int err = 0; const char * pszMsg = 0;
+		ASSERT(re.compile("schedd_collect_stats_(by|for)_(.+)", &pszMsg, &err, PCRE_CASELESS));
+		
+		OtherPoolStats.DisableAll();
+
+		ExtArray<const char *> names;
+		if (param_names_matching(re, names)) {
+
+			for (int ii = 0; ii < names.length(); ++ii) {
+
+				//dprintf(D_FULLDEBUG, "Found %s\n", names[ii]);
+				const MyString name = names[ii];
+				char * filter = param(names[ii]);
+				if ( ! filter) {
+					dprintf(D_ALWAYS, "Ignoring param '%s' : value is empty\n", names[ii]);
+					continue;
+				}
+
+				// the pool prefix will be the first submatch of the regex of the param name.
+				// unfortunately it's been lowercased by the time we get here, so we can't
+				// let the user choose the case, just capitalize it and use it as the prefix
+				ExtArray<MyString> groups(3);
+				if (re.match(name, &groups)) {
+					MyString byorfor = groups[1]; // this will by "by" or "for"
+					MyString other = groups[2]; // this will be lowercase
+					if (isdigit(other[0])) {
+						// can't start atributes with a digit, start with _ instead
+						other.sprintf("_%s", groups[2].Value());
+					} else {
+						other.setChar(0, toupper(other[0])); // capitalize it.
+					}
+
+					// for 'by' type stats, we also allow an expiration.
+					time_t lifetime = 0;
+					const int one_week = 60*60*24*7; // 60sec*60min*24hr*7day
+					bool by = (MATCH == strcasecmp(byorfor.Value(), "by"));
+					if (by) {
+						MyString expires_name;
+						expires_name.sprintf("schedd_expire_stats_by_%s", other.Value());
+						lifetime = (time_t)param_integer(expires_name.Value(), one_week);
+					}
+
+					dprintf(D_FULLDEBUG, "Collecting stats %s '%s' life=%"PRId64 " trigger is %s\n", 
+					        byorfor.Value(), other.Value(), lifetime, filter);
+					OtherPoolStats.Enable(other.Value(), filter, by, lifetime);
+				}
+				free(filter);
+			}
+		}
+		names.truncate(0);
+
+		OtherPoolStats.RemoveDisabled();
+	}
 
 	/* default 5 megabytes */
 	ReservedSwap = param_integer( "RESERVED_SWAP", 0 );
@@ -13518,6 +13667,7 @@ Scheduler::RecycleShadow(int /*cmd*/, Stream *stream)
     stats.Tick();
     stats.ShadowsRecycled += 1;
     stats.ShadowsRunning = numShadows;
+	OtherPoolStats.Tick();
 
 		// the add/delete_shadow_rec() functions update the job
 		// ads, so we need to do that here

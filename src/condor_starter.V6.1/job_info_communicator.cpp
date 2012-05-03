@@ -667,12 +667,11 @@ JobInfoCommunicator::initUserPrivWindows( void )
 
 	if ( !name ) {
 		char slot_user[255];
-		int slot_num = Starter->getMySlotNumber();
+		MyString slotName = "";
+		slotName = Starter->getMySlotName();
 
-		if ( slot_num < 1 ) {
-			slot_num = 1;
-		}
-		sprintf(slot_user, "SLOT%d_USER", slot_num);
+		slotName.upper_case();
+		sprintf(slot_user, "%s_USER", slotName);
 		char *run_jobs_as = param(slot_user);
 		if (run_jobs_as) {		
 			getDomainAndName(run_jobs_as, domain, name);
@@ -779,7 +778,7 @@ JobInfoCommunicator::checkForStarterDebugging( void )
 
 		// Also, if the starter has D_JOB turned on, we want to dump
 		// out the job ad to the log file...
-	if( DebugFlags & D_JOB ) {
+	if( IsDebugLevel( D_JOB ) ) {
 		dprintf( D_JOB, "*** Job ClassAd ***\n" );  
 		job_ad->dPrint( D_JOB );
         dprintf( D_JOB, "--- End of ClassAd ---\n" );

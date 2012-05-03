@@ -126,7 +126,7 @@ void set_hostpermissions();
 void set_vmuniverse();
 void set_hdfs();
 
-int main(int __argc, char** __argv) {
+int main(int argc, char** argv) {
 
   //UNUSED_VARIABLE ( hInstance );
   //UNUSED_VARIABLE ( hPrevInstance );
@@ -136,7 +136,7 @@ int main(int __argc, char** __argv) {
   open_log_file();
   
  
-  if ( !parse_args ( __argc, __argv ) ) {
+  if ( !parse_args ( argc, argv ) ) {
     exit ( 1 );
   }
   
@@ -208,18 +208,20 @@ set_vmgahpoptions() {
 	}
 
 	if ( Opt.release_dir ) {
-		char *control_script = "bin\\condor_vm_vmware.pl";
+		char *control_script = "bin\\condor_vm_vmware";
  
 		char *tmp = malloc(strlen(Opt.release_dir) 
 				   + strlen(control_script) + 2); 
-		char *short_name = NULL;
-		sprintf(tmp, "%s\\%s", Opt.release_dir, control_script);
-		short_name = get_short_path_name(tmp);
+		if (tmp) {
+			char *short_name = NULL;
+			sprintf(tmp, "%s\\%s", Opt.release_dir, control_script);
+			short_name = get_short_path_name(tmp);
  
-		free(tmp);
+			free(tmp);
  
-		set_option("VMWARE_SCRIPT", short_name);
-		free(short_name);
+			set_option("VMWARE_SCRIPT", short_name);
+			free(short_name);
+		}
  
 	}
 
@@ -724,6 +726,8 @@ attribute_matches( const char *string, const char *attr ) {
 	i = j = 0;
 	attr_len = strlen(string);
 	buf = (char*)malloc((attr_len+1)*sizeof(char));
+	if ( ! buf )
+		exit(-1);
 
 	for (; string[i]; i++)  {
 

@@ -20,7 +20,6 @@
 // condor includes
 #include "condor_common.h"
 #include "condor_classad.h"
-#include "EndpointObject.h"
 
 using namespace std;
 using namespace compat_classad;
@@ -28,34 +27,66 @@ using namespace compat_classad;
 namespace aviary {
 namespace locator {
 
+struct Endpoint {
+	// properties
+	string      Name;
+	string		MajorType;
+	string		MinorType;
+    string      Machine;
+    string      MyAddress;
+	string		EndpointUri;
+	int 		missed_updates;
+
+    // this is how we decided what is replaceable
+    bool operator==(const Endpoint& ep) {
+        return  (this->MyAddress == ep.MyAddress) && 
+                (this->Name == ep.Name);
+    };
+
+    friend std::stringstream& operator<< (std::stringstream &out, Endpoint& ep)
+    {
+        out << ep.Name << "/" << ep.MyAddress;
+        return out;
+    };
+
+};
+
+struct CompEndpoints {
+    bool operator()(const Endpoint& a, const Endpoint& b) const {
+        return a.Name < b.Name;
+    }
+};
+
+typedef set<Endpoint,CompEndpoints> EndpointSetType;
+typedef map<string, Endpoint> EndpointMapType;
+
 class LocatorObject
 {
 public:
 
 	// SOAP-facing method
-	bool locate(string& msg);
+	void locate(const string& name, const string& major, const string& minor, bool partials, 
+				EndpointSetType& matches);
 
-	// daemonCore-facing method
-	void update(EndpointObject* eobj);
+	// daemonCore-facing methods
+	void update(const ClassAd& ad);
+	void invalidate(const ClassAd& ad);
+	void invalidateAll();
+	void pruneMissingEndpoints(int max_misses);
+    bool isPublishing();
 
+	LocatorObject();
     ~LocatorObject();
-	static LocatorObject* getInstance();
-
-	// TODO: needed?
-	const char* getName() { return m_name.c_str(); }
-	const char* getPool() { return m_pool.c_str(); }
+	string getPool();
 
 private:
-    LocatorObject();
-	LocatorObject(LocatorObject const&);
-	LocatorObject& operator=(LocatorObject const&);
-
-	string m_name;
-	string m_pool;
-
-	static LocatorObject* m_instance;
+	Endpoint createEndpoint(const ClassAd& ad);
+	EndpointMapType m_endpoints;
+    bool m_publishing;
 
 };
+
+extern LocatorObject locator;
 
 }} /* aviary::locator */
 

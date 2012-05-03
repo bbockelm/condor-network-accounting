@@ -305,6 +305,36 @@ param_all(void)
 	return pvs;
 }
 
+// return a list of param names that match the given regex, this list is in hashtable order (i.e. no order)	
+int param_names_matching(Regex & re, ExtArray<const char *>& names)	
+{	
+	int cAdded = 0;	
+	HASHITER it = hash_iter_begin(ConfigTab, TABLESIZE);	
+	while( ! hash_iter_done(it)) {	
+		const char *name = hash_iter_key(it);	
+		if (re.match(name)) {	
+			names.add(name);	
+			++cAdded;	
+		}	
+		hash_iter_next(it);	
+	}	
+	hash_iter_delete(&it);	
+
+	return cAdded;	
+}
+
+int param_names_matching(Regex& re, std::vector<std::string>& names) {
+    const int s0 = names.size();
+    HASHITER it = hash_iter_begin(ConfigTab, TABLESIZE);
+    for (;  !hash_iter_done(it);  hash_iter_next(it)) {
+		const char *name = hash_iter_key(it);
+		if (re.match(name)) names.push_back(name);
+	}
+    hash_iter_delete(&it);
+    return names.size() - s0;
+}
+
+
 static int ParamValueNameAscendingSort(const void *l, const void *r)
 {
 	const ParamValue *left = (const ParamValue*)l;
@@ -1273,9 +1303,19 @@ fill_attributes()
 		extra_info->AddInternalParam("OPSYS_NAME");
 	}
 	
-	if( (tmp = sysapi_opsys_distro()) != NULL ) {
-		insert( "OPSYS_DISTRO", tmp, ConfigTab, TABLESIZE );
-		extra_info->AddInternalParam("OPSYS_DISTRO");
+	if( (tmp = sysapi_opsys_long_name()) != NULL ) {
+		insert( "OPSYS_LONG_NAME", tmp, ConfigTab, TABLESIZE );
+		extra_info->AddInternalParam("OPSYS_LONG_NAME");
+	}
+
+	if( (tmp = sysapi_opsys_short_name()) != NULL ) {
+		insert( "OPSYS_SHORT_NAME", tmp, ConfigTab, TABLESIZE );
+		extra_info->AddInternalParam("OPSYS_SHORT_NAME");
+	}
+
+	if( (tmp = sysapi_opsys_legacy()) != NULL ) {
+		insert( "OPSYS_LEGACY", tmp, ConfigTab, TABLESIZE );
+		extra_info->AddInternalParam("OPSYS_LEGACY");
 	}
 
         // temporary attributes for raw utsname info
@@ -1473,7 +1513,7 @@ param_without_default( const char *name )
 		return NULL;
 	}
 
-	if( DebugFlags & D_CONFIG ) {
+	if( IsDebugLevel( D_CONFIG ) ) {
 		if( strlen(name) < strlen(param_name) ) {
 			param_name[strlen(param_name)-strlen(name)] = '\0';
 			dprintf( D_CONFIG, "Config '%s': using prefix '%s' ==> '%s'\n",
@@ -2303,6 +2343,7 @@ set_persistent_config(char *admin, char *config)
 		filename.sprintf( "%s.%s", toplevel_persistent_config.Value(), admin );
 		tmp_filename.sprintf( "%s.tmp", filename.Value() );
 		do {
+			MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 			unlink( tmp_filename.Value() );
 			fd = safe_open_wrapper_follow( tmp_filename.Value(), O_WRONLY|O_CREAT|O_EXCL, 0644 );
 		} while (fd == -1 && errno == EEXIST);
@@ -2356,6 +2397,7 @@ set_persistent_config(char *admin, char *config)
 	// update admin list on disk
 	tmp_filename.sprintf( "%s.tmp", toplevel_persistent_config.Value() );
 	do {
+		MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 		unlink( tmp_filename.Value() );
 		fd = safe_open_wrapper_follow( tmp_filename.Value(), O_WRONLY|O_CREAT|O_EXCL, 0644 );
 	} while (fd == -1 && errno == EEXIST);
@@ -2416,8 +2458,10 @@ set_persistent_config(char *admin, char *config)
 	// if we removed a config, then we should clean up by removing the file(s)
 	if (!config || !config[0]) {
 		filename.sprintf( "%s.%s", toplevel_persistent_config.Value(), admin );
+		MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 		unlink( filename.Value() );
 		if (PersistAdminList.number() == 0) {
+			MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 			unlink( toplevel_persistent_config.Value() );
 		}
 	}
@@ -2562,6 +2606,7 @@ process_runtime_configs()
 					 ConfigLineNo, tmp_file, rArray[i].admin );
 			exit(1);
 		}
+		MSC_SUPPRESS_WARNING_FIXME(6031) // warning: return value of 'unlink' ignored.
 		unlink(tmp_file);
 		free(tmp_file);
 	}

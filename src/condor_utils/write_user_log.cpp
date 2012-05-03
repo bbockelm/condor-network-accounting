@@ -1234,9 +1234,12 @@ WriteUserLog::writeEvent ( ULogEvent *event,
 	}
 
 	// Open the global log
+	bool globalOpenError = false;
 	if ( !openGlobalLog(false) ) {
-		dprintf( D_ALWAYS, "WriteUserLog: Failed to open global log!\n" );
-		return false;
+		dprintf( D_ALWAYS, "ERROR: WriteUserLog: Failed to open global log!\n" );
+		// We *don't* want to return here, so we at least try to write
+		// to the "normal" log (see gittrac #2858).
+		globalOpenError = true;
 	}
 
 	// fill in event context
@@ -1246,26 +1249,32 @@ WriteUserLog::writeEvent ( ULogEvent *event,
 	event->setGlobalJobId(m_gjid);
 
 	// write global event
-	if ( !m_global_disable && m_global_path ) {
+	//TEMPTEMP -- don't try if we got a global open error
+	if ( !globalOpenError && !m_global_disable && m_global_path ) {
 		if ( ! doWriteEvent(event, true, false, param_jobad)  ) {
-			dprintf( D_ALWAYS, "WriteUserLog: global doWriteEvent()!\n" );
-			return false;
+			dprintf( D_ALWAYS, "ERROR: WriteUserLog: global doWriteEvent() failed on global log!\n" );
+			// We *don't* want to return here, so we at least try to write
+			// to the "normal" log (see gittrac #2858).
 		}
+		//TEMPTEMP -- do we want to do this if the global write failed?
+		//TEMPTEMP -- make sure to free attrsToWrite in all cases
 		char *attrsToWrite = param("EVENT_LOG_JOB_AD_INFORMATION_ATTRS");
 		if( attrsToWrite && *attrsToWrite ) {
+			//TEMPTEMP -- what the hell *is* this?
 			writeJobAdInfoEvent( attrsToWrite, event, param_jobad, true );
 		}
 		free( attrsToWrite );
 	}
 
-	if ( m_global_close ) {
+	//TEMPTEMP -- don't try if we got a global open error
+	if ( !globalOpenError && m_global_close ) {
 		closeGlobalLog( );
 	}
 
 	// write ulog event
 	if ( m_userlog_enable && m_fp ) {
 		if ( ! doWriteEvent(event, false, false, param_jobad) ) {
-			dprintf( D_ALWAYS, "WriteUserLog: user doWriteEvent()!\n" );
+			dprintf( D_ALWAYS, "ERROR: WriteUserLog: user doWriteEvent() failed on normal log!\n" );
 			return false;
 		}
 
@@ -1292,7 +1301,7 @@ void
 WriteUserLog::writeJobAdInfoEvent(char const *attrsToWrite, ULogEvent *event, ClassAd *param_jobad, bool is_global_event )
 {
 	ExprTree *tree;
-	EvalResult result;
+	classad::Value result;
 	char *curr;
 
 	ClassAd *eventAd = event->toClassAd();
@@ -1304,18 +1313,28 @@ WriteUserLog::writeJobAdInfoEvent(char const *attrsToWrite, ULogEvent *event, Cl
 		if ( (tree=param_jobad->LookupExpr(curr)) ) {
 				// found the attribute.  now evaluate it before
 				// we put it into the eventAd.
-			if ( EvalExprTree(tree,param_jobad,NULL,&result) ) {
+			if ( EvalExprTree(tree,param_jobad,NULL,result) ) {
 					// now inserted evaluated expr
-				switch (result.type) {
-				case LX_BOOL:
-				case LX_INTEGER:
-					eventAd->Assign( curr, result.i);
+				bool bval;
+				int ival;
+				double dval;
+				std::string sval;
+				switch (result.GetType()) {
+				case classad::Value::BOOLEAN_VALUE:
+					result.IsBooleanValue( bval );
+					eventAd->Assign( curr, bval );
 					break;
-				case LX_FLOAT:
-					eventAd->Assign( curr, result.f);
+				case classad::Value::INTEGER_VALUE:
+					result.IsIntegerValue( ival );
+					eventAd->Assign( curr, ival );
 					break;
-				case LX_STRING:
-					eventAd->Assign( curr, result.s);
+				case classad::Value::REAL_VALUE:
+					result.IsRealValue( dval );
+					eventAd->Assign( curr, dval );
+					break;
+				case classad::Value::STRING_VALUE:
+					result.IsStringValue( sval );
+					eventAd->Assign( curr, sval );
 					break;
 				default:
 					break;

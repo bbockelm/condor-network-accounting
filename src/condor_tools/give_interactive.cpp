@@ -56,6 +56,8 @@ ExprTree *rankCondPrioPreempt;// prio preemption (Rank >= CurrentRank)
 ExprTree *PreemptionReq;	// only preempt if true
 ExprTree *PreemptionRank; 	// rank preemption candidates
 
+void usage(const char *name, int iExitCode=1);
+
 bool
 obtainAdsFromCollector (ClassAdList &startdAds, const char *constraint)
 {
@@ -105,7 +107,8 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 	bool			newBestFound;
 		// to store results of evaluations
 	char			remoteUser[128];
-	EvalResult		result;
+	classad::Value	result;
+	bool			val;
 	float			tmp;
 	
 
@@ -132,8 +135,8 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 			candidate->LookupString (ATTR_REMOTE_USER, remoteUser)) 
 		{
 				// check if we are preempting for rank or priority
-			if( EvalExprTree( rankCondStd, candidate, &request, &result ) &&
-					result.type == LX_INTEGER && result.i == TRUE ) {
+			if( EvalExprTree( rankCondStd, candidate, &request, result ) &&
+				result.IsBooleanValue( val ) && val ) {
 					// offer strictly prefers this request to the one
 					// currently being serviced; preempt for rank
 				candidatePreemptState = RANK_PREEMPTION;
@@ -145,15 +148,15 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 					// (1) we need to make sure that PreemptionReq's hold (i.e.,
 					// if the PreemptionReq expression isn't true, dont preempt)
 				if (PreemptionReq && 
-					!(EvalExprTree(PreemptionReq,candidate,&request,&result) &&
-						result.type == LX_INTEGER && result.i == TRUE) ) {
+					!(EvalExprTree(PreemptionReq,candidate,&request,result) &&
+					  result.IsBooleanValue(val) && val) ) {
 					continue;
 				}
 					// (2) we need to make sure that the machine ranks the job
 					// at least as well as the one it is currently running 
 					// (i.e., rankCondPrioPreempt holds)
-				if(!(EvalExprTree(rankCondPrioPreempt,candidate,&request,&result)&&
-						result.type == LX_INTEGER && result.i == TRUE ) ) {
+				if(!(EvalExprTree(rankCondPrioPreempt,candidate,&request,result)&&
+					 result.IsBooleanValue(val) && val ) ) {
 						// machine doesn't like this job as much -- find another
 					continue;
 				}
@@ -185,10 +188,12 @@ giveBestMachine(ClassAd &request,ClassAdList &startdAds,
 		candidatePreemptRankValue = -(FLT_MAX);
 		if( candidatePreemptState != NO_PREEMPTION ) {
 			// calculate the preemption rank
+			double rval;
 			if( PreemptionRank &&
-				EvalExprTree(PreemptionRank,candidate,&request,&result) &&
-					result.type == LX_FLOAT) {
-				candidatePreemptRankValue = result.f;
+				EvalExprTree(PreemptionRank,candidate,&request,result) &&
+				result.IsNumber(rval)) {
+
+				candidatePreemptRankValue = rval;
 			} else if( PreemptionRank ) {
 				dprintf(D_ALWAYS, "Failed to evaluate PREEMPTION_RANK "
 					"expression to a float.\n");
@@ -387,7 +392,7 @@ findSubmittor( char *name )
 }
 
 void
-usage(const char *name)
+usage(const char *name, int iExitCode)
 {
 	printf("\nUsage: %s [-m] -[n number] [-c c_expr] [-r r_expr] [-p pool] \n", name);
 	printf(" -m: Return entire machine, not slots\n");
@@ -397,7 +402,7 @@ usage(const char *name)
 	printf(" -r r_expr: Use r_expr as the rank expression\n");
 	printf(" -p pool: Contact the Condor pool \"pool\"\n");
 	printf(" -h: this screen\n\n");
-	exit(1);
+	exit(iExitCode);
 }
 
 
@@ -414,6 +419,7 @@ main(int argc, char *argv[])
 	ClassAd *offer;
 	char *tmp;
 	int i;
+	int iExitUsageCode=1;
 	char buffer[1024];
 	HashTable<HashKey, int>	*slot_counts;
 
@@ -466,8 +472,10 @@ main(int argc, char *argv[])
 				}
 				rank = *ptr;
 				break;
+			case 'h': 
+			      iExitUsageCode = 0;
 			default:
-				usage(condor_basename(argv[0]));
+				usage(condor_basename(argv[0]), iExitUsageCode);
 			}		
 		}
 	}

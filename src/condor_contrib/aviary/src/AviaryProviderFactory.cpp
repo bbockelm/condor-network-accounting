@@ -31,7 +31,8 @@ using namespace aviary::locator;
 
 AviaryProvider* 
 AviaryProviderFactory::create(const string& log_file, 
-							  const string& service_name, const string& service_type,
+							  const string& service_name, const string& major_type,
+							  const string& minor_type,
 							  const string& uri_suffix)
 {
     AviaryProvider* provider = NULL;
@@ -67,9 +68,9 @@ AviaryProviderFactory::create(const string& log_file,
 	}
 
 	// see if we are using locator to publish our endpoint
-	bool use_locator = param_boolean("AVIARY_PUBLISH_LOCATION",FALSE);
+	bool use_locator = param_boolean("AVIARY_PUBLISH_LOCATION",FALSE) && minor_type != LOCATOR;
 	if (use_locator) {
-		ep = new EndpointPublisher(service_name, service_type);
+		ep = new EndpointPublisher(service_name, major_type, minor_type);
 		if (!ep->init(uri_suffix,have_ssl)) {
 			dprintf(D_ALWAYS,"Aviary location endpoint config failed\n");
 			return NULL;
@@ -80,7 +81,7 @@ AviaryProviderFactory::create(const string& log_file,
     if (!have_ssl) {
         Axis2SoapProvider* http = new Axis2SoapProvider(level,log_file.c_str(),repo_path.c_str());
         if (!http->init(port,read_timeout,axis_error)) {
-            dprintf(D_ALWAYS,"Axis2 HTTP configuration failed\n");
+            dprintf(D_ALWAYS,"Axis2 HTTP configuration failed, check possible conflict on port %d\n",port);
             delete http;
             return NULL;
         }
@@ -92,6 +93,7 @@ AviaryProviderFactory::create(const string& log_file,
         Axis2SslProvider* https = new Axis2SslProvider(level,log_file.c_str(),repo_path.c_str());
         if (!https->init(port,read_timeout,axis_error)) {
             dprintf(D_ALWAYS,"SSL/TLS requested but configuration failed\n");
+            dprintf(D_ALWAYS,"Check SSL config paths and possible conflict on port %d\n",port);
             delete https;
             return NULL;
         }
@@ -100,12 +102,12 @@ AviaryProviderFactory::create(const string& log_file,
     }
 #endif
 
-	// provider owns this now
-	provider->setPublisher(ep);
-	// ready to publish our endpoint
-	if (ep) {
-		ep->publish();
-	}
+    // ready to publish our endpoint
+    if (ep) {
+        // provider owns this now
+        provider->setPublisher(ep);
+        ep->start(param_integer("AVIARY_PUBLISH_INTERVAL", 10));
+    }
 
     return provider;
 }

@@ -1243,11 +1243,13 @@ CStarter::remoteHoldCommand( int /*cmd*/, Stream* s )
 	MyString hold_reason;
 	int hold_code;
 	int hold_subcode;
+	int soft;
 
 	s->decode();
 	if( !s->get(hold_reason) ||
 		!s->get(hold_code) ||
 		!s->get(hold_subcode) ||
+		!s->get(soft) ||
 		!s->end_of_message() )
 	{
 		dprintf(D_ALWAYS,"Failed to read message from %s in CStarter::remoteHoldCommand()\n", s->peer_description());
@@ -1263,6 +1265,10 @@ CStarter::remoteHoldCommand( int /*cmd*/, Stream* s )
 	s->encode();
 	if( !s->put(reply) || !s->end_of_message()) {
 		dprintf(D_ALWAYS,"Failed to send response to startd in CStarter::remoteHoldCommand()\n");
+	}
+
+	if( !soft ) {
+		return this->ShutdownFast();
 	}
 
 		//
@@ -2040,12 +2046,14 @@ CStarter::WriteRecoveryFile( ClassAd *recovery_ad )
 
 	if ( fclose( tmp_fp ) != 0 ) {
 		dprintf( D_ALWAYS, "Failed close recovery file\n" );
+		MSC_SUPPRESS_WARNING_FIXME(6031) // return value of unlink ignored.
 		unlink( tmp_file.Value() );
 		return;
 	}
 
 	if ( rotate_file( tmp_file.Value(), m_recoveryFile.Value() ) != 0 ) {
 		dprintf( D_ALWAYS, "Failed to rename recovery file\n" );
+		MSC_SUPPRESS_WARNING_FIXME(6031) // return value of unlink ignored.
 		unlink( tmp_file.Value() );
 	}
 }
@@ -2054,6 +2062,7 @@ void
 CStarter::RemoveRecoveryFile()
 {
 	if ( m_recoveryFile.Length() > 0 ) {
+		MSC_SUPPRESS_WARNING_FIXME(6031) // return value of unlink ignored.
 		unlink( m_recoveryFile.Value() );
 		m_recoveryFile = "";
 	}
@@ -2158,7 +2167,10 @@ CStarter::Continue( void )
 	UserProc *job;
 	m_job_list.Rewind();
 	while ((job = m_job_list.Next()) != NULL) {
-		job->Continue();
+		if (this->suspended)
+		{
+		  job->Continue();
+		}
 	}
 	
 		//
@@ -2284,6 +2296,7 @@ CStarter::Reaper(int pid, int exit_status)
 			// going to be empty, so don't bother with any of the rest
 			// of this.  instead, the starter is now able to call
 			// SpawnJob() to launch the main job.
+		pre_script = NULL; // done with pre-script
 		if( ! SpawnJob() ) {
 			dprintf( D_ALWAYS, "Failed to start main job, exiting\n" );
 			main_shutdown_fast();
@@ -2639,11 +2652,8 @@ CStarter::PublishToEnv( Env* proc_env )
 		// slot identifier
 	env_name = base.Value();
 	env_name += "SLOT";
-	int slot = getMySlotNumber();
-	if (!slot) {
-		slot = 1;
-	}
-	proc_env->SetEnv(env_name.Value(), slot);
+	
+	proc_env->SetEnv(env_name.Value(), getMySlotName());
 
 		// pass through the pidfamily ancestor env vars this process
 		// currently has to the job.
@@ -2712,6 +2722,40 @@ CStarter::getMySlotNumber( void )
 	}
 
 	return slot_number;
+}
+
+MyString
+CStarter::getMySlotName(void) {
+	
+	char *logappend = param("STARTER_LOG");		
+	const char *tmp = NULL;
+		
+	MyString slotName = "";
+			
+	if ( logappend ) {
+			// We currently use the extension of the starter log file
+			// name to determine which slot we are.  Strange.
+		char const *log_basename = condor_basename(logappend);
+		MyString prefix;
+
+		char* resource_prefix = param("STARTD_RESOURCE_PREFIX");
+		if( resource_prefix ) {
+			prefix.sprintf(".%s",resource_prefix);
+			free( resource_prefix );
+		}
+		else {
+			prefix = ".slot";
+		}
+
+		tmp = strstr(log_basename, prefix.Value());
+		if ( tmp ) {				
+			slotName = (tmp + 1); // skip the .
+		} 
+
+		free(logappend);
+	}
+
+	return slotName;
 }
 
 
@@ -2813,21 +2857,33 @@ CStarter::removeTempExecuteDir( void )
 	}
 #endif
 
-	Directory execute_dir( Execute, PRIV_ROOT );
-	if ( execute_dir.Find_Named_Entry( dir_name.Value() ) ) {
-
-		// since we chdir()'d to the execute directory, we can't
-		// delete it until we get out (at least on WIN32). So lets
-		// just chdir() to EXECUTE so we're sure we can remove it. 
-		if (chdir(Execute)) {
-			dprintf(D_ALWAYS, "Error: chdir(%s) failed: %s\n", Execute, strerror(errno));
+		// Remove the directory from all possible chroots.
+	pair_strings_vector root_dirs = root_dir_list();
+	bool has_failed = false;
+	for (pair_strings_vector::const_iterator it=root_dirs.begin(); it != root_dirs.end(); ++it) {
+		const char *full_execute_dir = dirscat(it->second.c_str(), Execute);
+		if (!full_execute_dir) {
+			continue;
 		}
+		Directory execute_dir( full_execute_dir, PRIV_ROOT );
+		if ( execute_dir.Find_Named_Entry( dir_name.Value() ) ) {
 
-		dprintf( D_FULLDEBUG, "Removing %s%c%s\n", Execute,
-				 DIR_DELIM_CHAR, dir_name.Value() );
-		return execute_dir.Remove_Current_File();
+			// since we chdir()'d to the execute directory, we can't
+			// delete it until we get out (at least on WIN32). So lets
+			// just chdir() to EXECUTE so we're sure we can remove it. 
+			if (chdir(Execute)) {
+				dprintf(D_ALWAYS, "Error: chdir(%s) failed: %s\n", Execute, strerror(errno));
+			}
+
+			dprintf( D_FULLDEBUG, "Removing %s%c%s\n", Execute,
+					 DIR_DELIM_CHAR, dir_name.Value() );
+			if (!execute_dir.Remove_Current_File()) {
+				has_failed = true;
+			}
+		}
+		delete [] full_execute_dir;
 	}
-	return true;
+	return !has_failed;
 }
 
 #if !defined(WIN32)

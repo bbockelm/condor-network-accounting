@@ -155,7 +155,7 @@ FileTransfer::FileTransfer()
 	last_download_time = 0;
 	ActiveTransferTid = -1;
 	TransferStart = 0;
-	uploadStartTime = uploadEndTime = downloadStartTime = downloadEndTime = 0;
+	uploadStartTime = uploadEndTime = downloadStartTime = downloadEndTime = (time_t)-1;
 	ClientCallback = 0;
 	ClientCallbackClass = NULL;
 	TransferPipe[0] = TransferPipe[1] = -1;
@@ -1596,7 +1596,7 @@ FileTransfer::DoDownload( filesize_t *total_bytes, ReliSock *s)
 	priv_state saved_priv = PRIV_UNKNOWN;
 	*total_bytes = 0;
 
-	downloadStartTime = (int)time(NULL);
+	downloadStartTime = time(NULL);
 
 	// we want to tell get_file() to perform an fsync (i.e. flush to disk)
 	// the files we download if we are the client & we will need to upload
@@ -2503,7 +2503,7 @@ FileTransfer::DoUpload(filesize_t *total_bytes, ReliSock *s)
 	MyString first_failed_error_desc;
 	int first_failed_line_number;
 
-	uploadStartTime = (int)time(NULL);
+	uploadStartTime = time(NULL);
 	*total_bytes = 0;
 	dprintf(D_FULLDEBUG,"entering FileTransfer::DoUpload\n");
 
@@ -3747,6 +3747,27 @@ int FileTransfer::InvokeFileTransferPlugin(CondorError &e, const char* source, c
 	}
 
 	return 0;
+}
+
+
+MyString FileTransfer::GetSupportedMethods() {
+	MyString method_list;
+
+	// iterate plugin_table if it exists
+	if (plugin_table) {
+		MyString junk;
+		MyString method;
+
+		plugin_table->startIterations();
+		while(plugin_table->iterate(method, junk)) {
+			// add comma if needed
+			if (!(method_list.IsEmpty())) {
+				method_list += ",";
+			}
+			method_list += method;
+		}
+	}
+	return method_list;
 }
 
 

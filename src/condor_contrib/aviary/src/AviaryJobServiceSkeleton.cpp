@@ -21,6 +21,8 @@
 #include "condor_config.h"
 #include "condor_attributes.h"
 
+#include <time.h>
+
 extern bool qmgmt_all_users_trusted;
 
 // local includes
@@ -45,6 +47,8 @@ using namespace AviaryCommon;
 using namespace aviary::codec;
 using namespace aviary::job;
 using namespace compat_classad;
+
+#define ATTR_COMP(X) 0==strcasecmp(attr_name,X)
 
 const char* BASIC_REQ_FORMAT = 
 "\
@@ -118,13 +122,13 @@ buildBasicRequirements(ResourceConstraintVectorType* _constraints, string& _reqs
 }
 
 bool
-isBasicAttribute(const string& attr_name) {
+isBasicAttribute(const char* attr_name) {
 	return (
-		attr_name == ATTR_JOB_CMD ||
-		attr_name == ATTR_REQUIREMENTS ||
-		attr_name == ATTR_OWNER ||
-		attr_name == ATTR_JOB_IWD ||
-		attr_name == ATTR_JOB_ARGUMENTS1
+		ATTR_COMP(ATTR_JOB_CMD) ||
+		ATTR_COMP(ATTR_REQUIREMENTS) ||
+		ATTR_COMP(ATTR_OWNER) ||
+		ATTR_COMP(ATTR_JOB_IWD) ||
+		ATTR_COMP(ATTR_JOB_ARGUMENTS1)
 	);
 }
 
@@ -136,7 +140,7 @@ addExtraAttributes(const CommonAttributeCollection* extra_attrs, AttributeMapTyp
 		const string& attr_key = attr->getName();
 
 		// Are we overriding our basic attributes?
-		if (!override_basic && isBasicAttribute(attr_key)) {
+		if (!override_basic && isBasicAttribute(attr_key.c_str())) {
 			// exclude this attribute from the submission map
 			continue;
 		}
@@ -233,14 +237,15 @@ AviaryJobServiceSkeleton::submitJob(wso2wsf::MessageContext* /*outCtx*/ ,AviaryJ
     attrMap[ATTR_REQUIREMENTS] = new AviaryAttribute(AviaryAttribute::EXPR_TYPE, reqBuilder.c_str());
 
     // need to add extras attrs also
-	// wso2 doesn't seem to make true nil checking easy
-	// might remove the Attributes element
-	CommonAttributeCollection* attrs = NULL;
-	if (!_submitJob->isExtraNil()) {
+    // wso2 doesn't seem to make true nil checking easy
+    // might remove the Attributes element
+    bool allow_overrides = !_submitJob->isAllowOverridesNil() && _submitJob->getAllowOverrides();
+    CommonAttributeCollection* attrs = NULL;
+    if (!_submitJob->isExtraNil()) {
 		attrs = _submitJob->getExtra();
 		if (attrs && !attrs->empty()) {			
 			if (attrs && !attrs->empty()) {
-				addExtraAttributes(attrs, attrMap,_submitJob->getAllowOverrides());
+				addExtraAttributes(attrs, attrMap,allow_overrides);
 			}
 		}
 	}
@@ -269,7 +274,7 @@ AviaryJobServiceSkeleton::submitJob(wso2wsf::MessageContext* /*outCtx*/ ,AviaryJ
 		}
         submitJobResponse->setId(new AviaryCommon::JobID(
 				jobId,schedulerObj->getPool(),schedulerObj->getName(),
-				new AviaryCommon::SubmissionID(submissionId,_submitJob->getOwner().c_str())));
+				new AviaryCommon::SubmissionID(submissionId,_submitJob->getOwner().c_str(),time(NULL))));
         submitJobResponse->setStatus(new AviaryCommon::Status(new AviaryCommon::StatusCodeType("OK"),""));
     }
     qmgmt_all_users_trusted = false;

@@ -120,7 +120,7 @@ enable_debug( void )
 	param_functions *p_funcs = get_param_functions();
 	Termlog = true;
 	dprintf_config( "TOOL", p_funcs );
-	set_debug_flags( "D_FULLDEBUG" );
+	set_debug_flags( NULL, D_FULLDEBUG );
 }
 
 static void
@@ -147,10 +147,10 @@ error( int code, ... )
 	if ( code < 0 ) {
 
 		msg = errmsgs[-code];
-
 		if ( !msg ) {
 			msg = errmsgs[-E_UNKNOWN];
 		}
+		assert ( msg != NULL );
 
 		fprintf ( stderr, "%s: ", name );
 		va_start ( args, code );

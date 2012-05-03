@@ -46,159 +46,6 @@ IsStringEnd(const char *str, unsigned off)
 
 namespace compat_classad {
 
-// EvalResult ctor
-EvalResult::EvalResult()
-{
-	type = LX_UNDEFINED;
-	debug = false;
-}
-
-// EvalResult dtor
-EvalResult::~EvalResult()
-{
-	if ((type == LX_STRING || type == LX_TIME) && (s)) {
-		delete [] s;
-	}
-}
-
-void EvalResult::clear()
-{
-	this->~EvalResult();
-	type = LX_UNDEFINED;
-}
-
-void
-EvalResult::deepcopy(const EvalResult & rhs)
-{
-	type = rhs.type;
-	debug = rhs.debug;
-	switch ( type ) {
-		case LX_INTEGER:
-		case LX_BOOL:
-			i = rhs.i;
-			break;
-		case LX_FLOAT:
-			f = rhs.f;
-			break;
-		case LX_STRING:
-				// need to make a deep copy of the string
-			s = strnewp( rhs.s );
-			break;
-		default:
-			break;
-	}
-}
-
-// EvalResult copy ctor
-EvalResult::EvalResult(const EvalResult & rhs)
-{
-	deepcopy(rhs);
-}
-
-// EvalResult assignment op
-EvalResult & EvalResult::operator=(const EvalResult & rhs)
-{
-	if ( this == &rhs )	{	// object assigned to itself
-		return *this;		// all done.
-	}
-
-		// deallocate any state in this object by invoking dtor
-	this->~EvalResult();
-
-		// call copy ctor to make a deep copy of data
-	deepcopy(rhs);
-
-		// return reference to invoking object
-	return *this;
-}
-
-
-void EvalResult::fPrintResult(FILE *fi)
-{
-    switch(type)
-    {
-	case LX_INTEGER :
-
-	     fprintf(fi, "%d", this->i);
-	     break;
-
-	case LX_FLOAT :
-
-	     fprintf(fi, "%f", this->f);
-	     break;
-
-	case LX_STRING :
-
-	     fprintf(fi, "%s", this->s);
-	     break;
-
-	case LX_NULL :
-
-	     fprintf(fi, "NULL");
-	     break;
-
-	case LX_UNDEFINED :
-
-	     fprintf(fi, "UNDEFINED");
-	     break;
-
-	case LX_ERROR :
-
-	     fprintf(fi, "ERROR");
-	     break;
-
-	default :
-
-	     fprintf(fi, "type unknown");
-	     break;
-    }
-    fprintf(fi, "\n");
-}
-
-void EvalResult::toString(bool force)
-{
-	switch(type) {
-		case LX_STRING:
-			break;
-		case LX_FLOAT: {
-			MyString buf;
-			buf.sprintf("%lf",f);
-			s = strnewp(buf.Value());
-			type = LX_STRING;
-			break;
-		}
-		case LX_BOOL:	
-			type = LX_STRING;
-			if (i) {
-				s = strnewp("TRUE");
-			} else {
-				s = strnewp("FALSE");
-			}	
-			break;
-		case LX_INTEGER: {
-			MyString buf;
-			buf.sprintf("%d",i);
-			s = strnewp(buf.Value());
-			type = LX_STRING;
-			break;
-		}
-		case LX_UNDEFINED:
-			if( force ) {
-				s = strnewp("UNDEFINED");
-				type = LX_STRING;
-			}
-			break;
-		case LX_ERROR:
-			if( force ) {
-				s = strnewp("ERROR");
-				type = LX_STRING;
-			}
-			break;
-		default:
-			ASSERT("Unknown classad result type");
-	}
-}
-
 static StringList ClassAdUserLibs;
 
 bool ClassAd::m_initConfig = false;
@@ -474,10 +321,7 @@ bool stringListMember_func( const char *name,
 
 	StringList sl( list_str.c_str(), delim_str.c_str() );
 	int rc;
-	if ( sl.number() == 0 ) {
-		result.SetUndefinedValue();
-		return true;
-	} else if ( strcasecmp( name, "stringlistmember" ) == 0 ) {
+	if ( strcasecmp( name, "stringlistmember" ) == 0 ) {
 		rc = sl.contains( item_str.c_str() );
 	} else {
 		rc = sl.contains_anycase( item_str.c_str() );
@@ -586,6 +430,145 @@ bool stringListRegexpMember_func( const char * /*name*/,
 	return true;
 }
 
+// split user@domain or slot@machine, result is always a list of 2 strings
+// if there is no @ in the input, then for user@domain the domain is empty
+// for slot@machine the slot is empty
+static
+bool splitAt_func( const char * name,
+	const classad::ArgumentList &arg_list,
+	classad::EvalState &state, 
+	classad::Value &result )
+{
+	classad::Value arg0;
+
+	// Must have one argument
+	if ( arg_list.size() != 1) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	// Evaluate the argument
+	if( !arg_list[0]->Evaluate( state, arg0 )) {
+		result.SetErrorValue();
+		return false;
+	}
+
+	// If either argument isn't a string, then the result is
+	// an error.
+	std::string str;
+	if( !arg0.IsStringValue(str) ) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	classad::Value first;
+	classad::Value second;
+
+	unsigned int ix = str.find_first_of('@');
+	if (ix >= str.size()) {
+		if (0 == strcasecmp(name, "splitslotname")) {
+			first.SetStringValue("");
+			second.SetStringValue(str);
+		} else {
+			first.SetStringValue(str);
+			second.SetStringValue("");
+		}
+	} else {
+		first.SetStringValue(str.substr(0, ix));
+		second.SetStringValue(str.substr(ix+1));
+	}
+
+	classad::ExprList *lst = new classad::ExprList();
+	ASSERT(lst);
+	lst->push_back(classad::Literal::MakeLiteral(first));
+	lst->push_back(classad::Literal::MakeLiteral(second));
+
+	result.SetListValue(lst);
+
+	return true;
+}
+
+// split using arbitrary separator characters
+static
+bool splitArb_func( const char * /*name*/,
+	const classad::ArgumentList &arg_list,
+	classad::EvalState &state, 
+	classad::Value &result )
+{
+	classad::Value arg0;
+
+	// Must have one or 2 arguments
+	if ( arg_list.size() != 1 && arg_list.size() != 2) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	// Evaluate the first argument
+	if( !arg_list[0]->Evaluate( state, arg0 )) {
+		result.SetErrorValue();
+		return false;
+	}
+
+	// if we have 2 arguments, the second argument is a set of
+	// separator characters, the default set of separators is , and whitespace
+	std::string seps = ", \t";
+	classad::Value arg1;
+	if (arg_list.size() >= 2 && ! arg_list[1]->Evaluate( state, arg1 )) {
+		result.SetErrorValue();
+		return false;
+	}
+
+	// If either argument isn't a string, then the result is
+	// an error.
+	std::string str;
+	if( !arg0.IsStringValue(str) ) {
+		result.SetErrorValue();
+		return true;
+	}
+	if (arg_list.size() >= 2 && ! arg1.IsStringValue(seps)) {
+		result.SetErrorValue();
+		return true;
+	}
+
+	classad::ExprList *lst = new classad::ExprList();
+	ASSERT(lst);
+
+	// walk the input string, splitting at each instance of a separator
+	// character and discarding empty strings.  Thus leading and trailing
+	// separator characters are ignored, and runs of multiple separator
+	// characters have special treatment, multiple whitespace seps are
+	// treated as a single sep, as are single separators mixed with whitespace.
+	// but runs of a single separator are handled individually, thus
+	// "foo, bar" is the same as "foo ,bar" and "foo,bar".  But not the same as
+	// "foo,,bar", which produces a list of 3 items rather than 2.
+	unsigned int ixLast = 0;
+	classad::Value val;
+	if (seps.length() > 0) {
+		unsigned int ix = str.find_first_of(seps, ixLast);
+		int      ch = -1;
+		while (ix < str.length()) {
+			if (ix - ixLast > 0) {
+				val.SetStringValue(str.substr(ixLast, ix - ixLast));
+				lst->push_back(classad::Literal::MakeLiteral(val));
+			} else if (!isspace(ch) && ch == str[ix]) {
+				val.SetStringValue("");
+				lst->push_back(classad::Literal::MakeLiteral(val));
+			}
+			if (!isspace(str[ix])) ch = str[ix];
+			ixLast = ix+1;
+			ix = str.find_first_of(seps, ixLast);
+		}
+	}
+	if (str.length() > ixLast) {
+		val.SetStringValue(str.substr(ixLast));
+		lst->push_back(classad::Literal::MakeLiteral(val));
+	}
+
+	result.SetListValue(lst);
+
+	return true;
+}
+
 static
 void registerStrlistFunctions()
 {
@@ -614,6 +597,16 @@ void registerStrlistFunctions()
 	name = "stringList_regexpMember";
 	classad::FunctionCall::RegisterFunction( name,
 											 stringListRegexpMember_func );
+
+	// user@domain, slot@machine & sinful string crackers.
+	name = "splitusername";
+	classad::FunctionCall::RegisterFunction( name, splitAt_func );
+	name = "splitslotname";
+	classad::FunctionCall::RegisterFunction( name, splitAt_func );
+	name = "split";
+	classad::FunctionCall::RegisterFunction( name, splitArb_func );
+	//name = "splitsinful";
+	//classad::FunctionCall::RegisterFunction( name, splitSinful_func );
 }
 
 void
@@ -995,6 +988,26 @@ LookupInteger( const char *name, int &value ) const
 }
 
 int ClassAd::
+LookupInteger( const char *name, int64_t &value ) const
+{
+	bool    boolVal;
+	int     haveInteger;
+	string  sName(name);
+	int		tmp_val;
+
+	if( EvaluateAttrInt(sName, tmp_val ) ) {
+		value = tmp_val;
+		haveInteger = TRUE;
+	} else if( EvaluateAttrBool(sName, boolVal ) ) {
+		value = boolVal ? 1 : 0;
+		haveInteger = TRUE;
+	} else {
+		haveInteger = FALSE;
+	}
+	return haveInteger;
+}
+
+int ClassAd::
 LookupFloat( const char *name, float &value ) const
 {
 	double  doubleVal;
@@ -1170,36 +1183,60 @@ int ClassAd::
 EvalInteger (const char *name, classad::ClassAd *target, int &value)
 {
 	int rc = 0;
-	int tmp_val;
+	classad::Value val;
 
 	if( target == this || target == NULL ) {
 		getTheMyRef( this );
-		if( EvaluateAttrInt( name, tmp_val ) ) { 
-			value = tmp_val;
+		if( EvaluateAttr( name, val ) ) { 
 			rc = 1;
 		}
 		releaseTheMyRef( this );
-		return rc;
 	}
+	else 
+	{
+	  getTheMatchAd( this, target );
+	  if( this->Lookup( name ) ) {
+		  if( this->EvaluateAttr( name, val ) ) {
+			  rc = 1;
+		  }
+	  } else if( target->Lookup( name ) ) {
+		  if( target->EvaluateAttr( name, val ) ) {
+			  rc = 1;
+		  }
+	  }
+	  releaseTheMatchAd();
+	}
+	
+	
+	// we have a "val" now cast if needed.
+	if ( 1 == rc ) 
+	{
+	  double doubleVal;
+	  int intVal;
+	  bool boolVal;
 
-	getTheMatchAd( this, target );
-	if( this->Lookup( name ) ) {
-		if( this->EvaluateAttrInt( name, tmp_val ) ) {
-			value = tmp_val;
-			rc = 1;
-		}
-	} else if( target->Lookup( name ) ) {
-		if( target->EvaluateAttrInt( name, tmp_val ) ) {
-			value = tmp_val;
-			rc = 1;
-		}
+	  if( val.IsRealValue( doubleVal ) ) {
+	    value = ( int )doubleVal;
+	  }
+	  else if( val.IsIntegerValue( intVal ) ) {
+	    value = intVal;
+	  }
+	  else if( val.IsBooleanValue( boolVal ) ) {
+	    value = ( int )boolVal;
+	  }
+	  else 
+	  { 
+	    // if we got here there is an issue with evaluation.
+	    rc = 0;
+	  }
+			
 	}
-	releaseTheMatchAd();
+	
 	return rc;
 }
 
 int ClassAd::
-EvalFloat (const char *name, classad::ClassAd *target, float &value)
+EvalFloat (const char *name, classad::ClassAd *target, double &value)
 {
 	int rc = 0;
 	classad::Value val;
@@ -1211,15 +1248,15 @@ EvalFloat (const char *name, classad::ClassAd *target, float &value)
 		getTheMyRef( this );
 		if( EvaluateAttr( name, val ) ) {
 			if( val.IsRealValue( doubleVal ) ) {
-				value = ( float )doubleVal;
+				value = doubleVal;
 				rc = 1;
 			}
 			if( val.IsIntegerValue( intVal ) ) {
-				value = ( float )intVal;
+				value = intVal;
 				rc = 1;
 			}
 			if( val.IsBooleanValue( boolVal ) ) {
-				value = ( float )boolVal;
+				value = boolVal;
 				rc = 1;
 			}
 		}
@@ -1231,30 +1268,30 @@ EvalFloat (const char *name, classad::ClassAd *target, float &value)
 	if( this->Lookup( name ) ) {
 		if( this->EvaluateAttr( name, val ) ) {
 			if( val.IsRealValue( doubleVal ) ) {
-				value = ( float )doubleVal;
+				value = doubleVal;
 				rc = 1;
 			}
 			if( val.IsIntegerValue( intVal ) ) {
-				value = ( float )intVal;
+				value = intVal;
 				rc = 1;
 			}
 			if( val.IsBooleanValue( boolVal ) ) {
-				value = ( float )boolVal;
+				value = boolVal;
 				rc = 1;
 			}
 		}
 	} else if( target->Lookup( name ) ) {
 		if( target->EvaluateAttr( name, val ) ) {
 			if( val.IsRealValue( doubleVal ) ) {
-				value = ( float )doubleVal;
+				value = doubleVal;
 				rc = 1;
 			}
 			if( val.IsIntegerValue( intVal ) ) {
-				value = ( float )intVal;
+				value = intVal;
 				rc = 1;
 			}
 			if( val.IsBooleanValue( boolVal ) ) {
-				value = ( float )boolVal;
+				value = boolVal;
 				rc = 1;
 			}
 		}
@@ -1285,7 +1322,7 @@ EvalBool  (const char *name, classad::ClassAd *target, int &value)
 				value = intVal ? 1 : 0;
 				rc = 1;
 			} else if( val.IsRealValue( doubleVal ) ) {
-				value = IS_DOUBLE_ZERO(doubleVal) ? 1 : 0;
+				value = IS_DOUBLE_ZERO(doubleVal) ? 0 : 1;
 				rc = 1;
 			}
 		}
@@ -2491,6 +2528,7 @@ static const char *machine_attrs_list[] = {
 	ATTR_VM_NETWORKING_TYPES,
 	ATTR_HAS_RECONNECT,
 	ATTR_HAS_FILE_TRANSFER,
+	ATTR_HAS_FILE_TRANSFER_PLUGIN_METHODS,
 	ATTR_HAS_PER_FILE_ENCRYPTION,
 	ATTR_HAS_MPI,
 	ATTR_HAS_TDP,
