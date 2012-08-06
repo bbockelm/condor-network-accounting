@@ -37,6 +37,18 @@ if ( WITH_VOMS )
 								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/private.patch &&
 								${CMAKE_CURRENT_SOURCE_DIR}/voms_file_patch.sh )
 			set (VOMS_OPENSSL_FLAG --with-openssl-prefix=${OPENSSL_INSTALL_LOC})
+		elseif( DARWIN )
+			set (VOMS_DEPENDS ${GLOBUS_REF})
+			set (VOMS_PATCH patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/configure_openssl.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/configure.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/makefile.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/private.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/openssl_1_0.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/globus52.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/replib.patch &&
+								cp ${CMAKE_CURRENT_SOURCE_DIR}/dummy.c org.glite.security.voms/src/replib &&
+								${CMAKE_CURRENT_SOURCE_DIR}/voms_file_patch.sh )
+			set (VOMS_OPENSSL_FLAG "")
 		else()
 			set (VOMS_DEPENDS ${GLOBUS_REF})
 			set (VOMS_PATCH patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/configure_openssl.patch &&
@@ -44,6 +56,7 @@ if ( WITH_VOMS )
 								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/makefile.patch &&
 								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/private.patch &&
 								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/openssl_1_0.patch &&
+								patch -p0 < ${CMAKE_CURRENT_SOURCE_DIR}/globus52.patch &&
 								${CMAKE_CURRENT_SOURCE_DIR}/voms_file_patch.sh )
 			if ( ${SYSTEM_NAME} MATCHES "rhel3" )
 				set (VOMS_OPENSSL_FLAG --with-openssl-prefix=/usr/kerberos)
@@ -52,7 +65,7 @@ if ( WITH_VOMS )
 			endif()
 		endif()
 
-		condor_pre_external( VOMS voms-1.9.10_4-p2 "include;${VOMS_LIB}" "done")
+		condor_pre_external( VOMS voms-1.9.10_4-p3 "include;${VOMS_LIB}" "done")
 
 		ExternalProject_Add(voms
 							DEPENDS ${VOMS_DEPENDS}
@@ -69,7 +82,7 @@ if ( WITH_VOMS )
 								--with-api-only
 								${VOMS_OPENSSL_FLAG}
 								--with-globus-prefix=${GLOBUS_INSTALL_LOC}
-								--with-globus-flavor=${GLOBUS_FLAVOR} --disable-java --disable-docs --disable-glite
+								--with-globus-flavor=${GLOBUS_FLAVOR}pthr --disable-java --disable-docs --disable-glite
 							#--Build Step ----------
 							BUILD_COMMAND cd org.glite.security.voms && make
 							BUILD_IN_SOURCE 1
@@ -79,11 +92,11 @@ if ( WITH_VOMS )
 				)
 
 		if ( LINUX )
-			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}.so" )
+			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}pthr.so" )
 		elseif ( DARWIN )
-			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}.dylib" )
+			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}pthr.dylib" )
 		else()
-			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}.a" )
+			set( VOMS_FOUND "${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_${GLOBUS_FLAVOR}pthr.a" )
 		endif()
 
 		condor_post_external( voms include/glite/security OFF )
@@ -104,6 +117,18 @@ if ( WITH_VOMS )
 				# itself, it doesn't know to strip them.
 				install( CODE "execute_process(COMMAND find \$ENV{DESTDIR}/${CMAKE_INSTALL_PREFIX}/${EXTERNALS_LIB} -name libvoms*.so*
 					COMMAND xargs strip)" )
+			endif()
+			# Check libvomsapi's shared library dependencies
+			# and copy a specific subset of those libraries
+			# into <release>/lib/condor
+			# This is to pick up libexpat, which libvomsapi
+			# depends on, but none of the binaries that use it do.
+			if ( NOT CONDOR_PACKAGE_BUILD )
+				set( SRC_DIR ${CMAKE_SOURCE_DIR} )
+				install( CODE "execute_process(COMMAND mkdir -p ${CMAKE_INSTALL_PREFIX}/lib/condor)" )
+				install( CODE "execute_process(COMMAND ${SRC_DIR}/src/condor_scripts/print-libs ${VOMS_INSTALL_LOC}/${VOMS_LIB}/libvomsapi_*.so ${SRC_DIR}/src/condor_scripts/syslib-patterns
+					 COMMAND xargs -isrc cp src ${CMAKE_INSTALL_PREFIX}/lib/condor
+			 		 )" )
 			endif()
 		endif()
 		if ( DARWIN )

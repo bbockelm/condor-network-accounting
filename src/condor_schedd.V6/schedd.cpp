@@ -89,7 +89,6 @@
 #include "filename_tools.h"
 #include "ipv6_hostname.h"
 #include "condor_email.h"
-
 #if defined(WANT_CONTRIB) && defined(WITH_MANAGEMENT)
 #if defined(HAVE_DLOPEN)
 #include "ScheddPlugin.h"
@@ -1513,13 +1512,14 @@ count( ClassAd *job )
 	// increment our count of the number of job ads in the queue
 	scheduler.JobsTotalAds++;
 
-	// we don't actually need this for the current set of other_stats
+	// build a list of other stats pools that match this job
 	//
-	//ScheddOtherStats * other_stats = NULL;
-	//if (scheduler.OtherPoolStats.AnyEnabled()) {
-	//	other_stats = OtherPoolStats.Matches(*job);
-	//}
-	//#define OTHER for (ScheddOtherStats * po = other_stats; po; po = po->next) (po->stats)
+	time_t now = time(NULL);
+	ScheddOtherStats * other_stats = NULL;
+	if (scheduler.OtherPoolStats.AnyEnabled()) {
+		other_stats = scheduler.OtherPoolStats.Matches(*job,now);
+	}
+	#define OTHER for (ScheddOtherStats * po = other_stats; po; po = po->next) (po->stats)
 
 	// insert owner even if REMOVED or HELD for condor_q -{global|sub}
 	// this function makes its own copies of the memory passed in 
@@ -1591,9 +1591,7 @@ count( ClassAd *job )
 		// if the gridmanager has set Managed="ScheddDone", then it's done
 		// with the job and doesn't want to see it again.
 		if ( status == REMOVED && job_managed_done == false ) {
-			char job_id[20];
-			if ( job->LookupString( ATTR_GRID_JOB_ID, job_id,
-									sizeof(job_id) ) )
+			if ( job->LookupString( ATTR_GRID_JOB_ID, NULL, 0 ) )
 			{
 				// looks like the job's remote job id is still valid,
 				// so there is still a job submitted remotely somewhere.
@@ -1636,14 +1634,14 @@ count( ClassAd *job )
 		int job_image_size = 0;
 		job->LookupInteger("ImageSize_RAW", job_image_size);
 		scheduler.stats.JobsRunningSizes += (int64_t)job_image_size * 1024;
-		//OTHER.JobsRunningSizes += (int64_t)job_image_size * 1024;
+		OTHER.JobsRunningSizes += (int64_t)job_image_size * 1024;
 
 		int job_start_date = 0;
 		int job_running_time = 0;
 		if (job->LookupInteger(ATTR_JOB_START_DATE, job_start_date))
-			job_running_time = (time(NULL) - job_start_date);
+			job_running_time = (now - job_start_date);
 		scheduler.stats.JobsRunningRuntimes += job_running_time;
-		//OTHER.JobsRunningRuntimes += job_running_time;
+		OTHER.JobsRunningRuntimes += job_running_time;
 	} else if (status == HELD) {
 		scheduler.JobsHeld++;
 		scheduler.Owners[OwnerNum].JobsHeld++;
@@ -1819,9 +1817,7 @@ abort_job_myself( PROC_ID job_id, JobAction action, bool log_hold,
 			// delete ATTR_GRID_JOB_ID from the ad and set Managed to
 			// ScheddDone.
 		if ( !job_managed && !job_managed_done && mode==REMOVED ) {
-			char jobID[20];
-			if ( job_ad->LookupString( ATTR_GRID_JOB_ID, jobID,
-									   sizeof(jobID) ) )
+			if ( job_ad->LookupString( ATTR_GRID_JOB_ID, NULL, 0 ) )
 			{
 				// looks like the job's remote job id is still valid,
 				// so there is still a job submitted remotely somewhere.
@@ -2589,18 +2585,26 @@ jobIsFinishedDone( int cluster, int proc, void*, int )
 // events and must be deleted when you're done.  This returns NULL if
 // the user didn't want a WriteUserLog, so you must check for NULL before
 // using the pointer you get back.
-WriteUserLog*
+std::vector<WriteUserLog*>
 Scheduler::InitializeUserLog( PROC_ID job_id ) 
 {
+	std::vector<WriteUserLog*> ulogs;
 	MyString logfilename;
+	MyString dagmanNodeLog;
 	ClassAd *ad = GetJobAd(job_id.cluster,job_id.proc);
-	if( getPathToUserLog(ad, logfilename)==false )
-	{			
+	bool has_log = false;
+	if( getPathToUserLog(ad, logfilename) ) {
+		has_log = true;
+	}
+	if( getPathToUserLog(ad, dagmanNodeLog, ATTR_DAGMAN_WORKFLOW_LOG) ) {			
+		has_log = true;
+	}
+	if(!has_log) {
 			// if there is no userlog file defined, then our work is
 			// done...  
-		return NULL;
+		return ulogs;
 	}
-	
+
 	MyString owner;
 	MyString domain;
 	MyString iwd;
@@ -2611,40 +2615,85 @@ Scheduler::InitializeUserLog( PROC_ID job_id )
 	GetAttributeString(job_id.cluster, job_id.proc, ATTR_NT_DOMAIN, domain);
 	GetAttributeString(job_id.cluster, job_id.proc, ATTR_GLOBAL_JOB_ID, gjid);
 
-	dprintf( D_FULLDEBUG, 
-			 "Writing record to user logfile=%s owner=%s\n",
-			 logfilename.Value(), owner.Value() );
+	std::string logfile(logfilename.Value());
+	if(!logfile.empty()) {
+		dprintf( D_FULLDEBUG,
+				"Writing record to user logfile=%s owner=%s\n",
+				logfile.c_str(), owner.Value() );
 
-	WriteUserLog* ULog=new WriteUserLog();
-	if (0 <= GetAttributeBool(job_id.cluster, job_id.proc,
-							  ATTR_ULOG_USE_XML, &use_xml)
-		&& 1 == use_xml) {
-		ULog->setUseXML(true);
-	} else {
-		ULog->setUseXML(false);
-	}
-	ULog->setCreatorName( Name );
-	if (ULog->initialize(owner.Value(), domain.Value(), logfilename.Value(), job_id.cluster, job_id.proc, 0, gjid.Value())) {
-		return ULog;
-	} else {
+		WriteUserLog* ULog=new WriteUserLog();
+		ULog->setUseXML(0 <= GetAttributeBool(job_id.cluster, job_id.proc,
+					ATTR_ULOG_USE_XML, &use_xml) && 1 == use_xml);
+		ULog->setCreatorName( Name );
+		if (ULog->initialize(owner.Value(), domain.Value(),
+					logfile.c_str(), job_id.cluster, job_id.proc, 0,
+					gjid.Value())) {
+			ulogs.push_back(ULog);
+		} else {
 			// If the user log is in the spool directory, try writing to
 			// it as user condor. The spool directory spends some of its
 			// time owned by condor.
-		char *tmp = gen_ckpt_name( Spool, job_id.cluster, job_id.proc, 0 );
-		std::string SpoolDir;
-		sprintf( SpoolDir, "%s%c", tmp, DIR_DELIM_CHAR );
-		free( tmp );
-		if ( !strncmp( SpoolDir.c_str(), logfilename.Value(), SpoolDir.length() ) &&
-			 ULog->initialize( logfilename.Value(), job_id.cluster, job_id.proc, 0, gjid.Value() ) ) {
-			return ULog;
+			char *tmp = gen_ckpt_name( Spool, job_id.cluster, job_id.proc, 0 );
+			std::string SpoolDir(tmp);
+			SpoolDir += DIR_DELIM_CHAR;
+			free( tmp );
+			if ( !strncmp( SpoolDir.c_str(), logfile.c_str(),
+						SpoolDir.length() ) &&
+					ULog->initialize( logfile.c_str(), job_id.cluster,
+						job_id.proc, 0, gjid.Value() ) ) {
+				ulogs.push_back(ULog);
+			} else {
+				dprintf ( D_ALWAYS, "WARNING: Invalid user log file specified: %s\n",
+						logfile.c_str());
+				delete ULog;
+			}
 		}
-		dprintf ( D_ALWAYS,
-				"WARNING: Invalid user log file specified: %s\n", logfilename.Value());
-		delete ULog;
-		return NULL;
 	}
-}
+	logfile = dagmanNodeLog.Value();
+	if(!logfile.empty()) {
+		dprintf( D_FULLDEBUG,
+				"Writing record to user logfile=%s owner=%s\n",
+				logfile.c_str(), owner.Value() );
 
+		WriteUserLog* ULog=new WriteUserLog();
+		ULog->setUseXML(false); // Dagman log is never xml
+		ULog->setCreatorName( Name );
+		if(!ulogs.empty()) { // Only write the global log once
+			ULog->setEnableGlobalLog( false );
+			MyString msk; // Mask only the dagman log
+			GetAttributeString(job_id.cluster, job_id.proc, ATTR_DAGMAN_WORKFLOW_MASK,
+				msk);
+			Tokenize(msk.Value());
+			while(const char* mask = GetNextToken(",",true)) {
+				ULog->AddToMask(ULogEventNumber(atoi(mask)));
+			}
+		}
+		if (ULog->initialize(owner.Value(), domain.Value(),
+					logfile.c_str(), job_id.cluster, job_id.proc, 0,
+					gjid.Value())) {
+			ulogs.push_back(ULog);
+		} else {
+			// If the user log is in the spool directory, try writing to
+			// it as user condor. The spool directory spends some of its
+			// time owned by condor.
+			char *tmp = gen_ckpt_name( Spool, job_id.cluster, job_id.proc, 0 );
+			std::string SpoolDir(tmp);
+			SpoolDir += DIR_DELIM_CHAR;
+			free( tmp );
+			if ( !strncmp( SpoolDir.c_str(), logfile.c_str(),
+						SpoolDir.length() ) &&
+					ULog->initialize( logfile.c_str(), job_id.cluster,
+						job_id.proc, 0, gjid.Value() ) ) {
+				ulogs.push_back(ULog);
+			} else {
+				dprintf ( D_ALWAYS, "WARNING: Invalid user log file specified: %s\n",
+						logfile.c_str());
+				delete ULog;
+			}
+		}
+	}	
+	return ulogs;
+}
 
 bool
 Scheduler::WriteSubmitToUserLog( PROC_ID job_id, bool do_fsync )
@@ -2660,8 +2709,8 @@ Scheduler::WriteSubmitToUserLog( PROC_ID job_id, bool do_fsync )
 		}
 	}
 
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2676,25 +2725,29 @@ Scheduler::WriteSubmitToUserLog( PROC_ID job_id, bool do_fsync )
 		event.submitEventUserNotes = strnewp(submitUserNotes.c_str());
 	}
 
-	ULog->setEnableFsync(do_fsync);
-	bool status = ULog->writeEvent(&event, job_ad);
-	delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		(*p)->setEnableFsync(do_fsync);
+		bool status = (*p)->writeEvent(&event, job_ad);
+		delete *p;
 
-	if (!status) {
-		dprintf( D_ALWAYS,
-				 "Unable to log ULOG_SUBMIT event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+		if (!status) {
+			dprintf( D_ALWAYS,
+					"Unable to log ULOG_SUBMIT event for job %d.%d\n",
+					job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
 Scheduler::WriteAbortToUserLog( PROC_ID job_id )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2707,25 +2760,28 @@ Scheduler::WriteAbortToUserLog( PROC_ID job_id )
 		free( reason );
 	}
 
-	bool status =
-		ULog->writeEvent(&event, GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool status = (*p)->writeEvent(&event, GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-	if (!status) {
-		dprintf( D_ALWAYS,
-				 "Unable to log ULOG_JOB_ABORTED event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+		if (!status) {
+			dprintf( D_ALWAYS,
+					 "Unable to log ULOG_JOB_ABORTED event for job %d.%d\n",
+					 job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
 Scheduler::WriteHoldToUserLog( PROC_ID job_id )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2756,24 +2812,27 @@ Scheduler::WriteHoldToUserLog( PROC_ID job_id )
 		event.setReasonSubCode(hold_reason_subcode);
 	}
 
-	bool status =
-		ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool status = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-	if (!status) {
-		dprintf( D_ALWAYS, "Unable to log ULOG_JOB_HELD event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+		if (!status) {
+			dprintf( D_ALWAYS, "Unable to log ULOG_JOB_HELD event for job %d.%d\n",
+					 job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
 Scheduler::WriteReleaseToUserLog( PROC_ID job_id )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2786,25 +2845,28 @@ Scheduler::WriteReleaseToUserLog( PROC_ID job_id )
 		free( reason );
 	}
 
-	bool status =
-		ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool status = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-	if (!status) {
-		dprintf( D_ALWAYS,
-				 "Unable to log ULOG_JOB_RELEASED event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+		if (!status) {
+			dprintf( D_ALWAYS,
+					 "Unable to log ULOG_JOB_RELEASED event for job %d.%d\n",
+					 job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
 Scheduler::WriteExecuteToUserLog( PROC_ID job_id, const char* sinful )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2818,47 +2880,52 @@ Scheduler::WriteExecuteToUserLog( PROC_ID job_id, const char* sinful )
 
 	ExecuteEvent event;
 	event.setExecuteHost( host );
-	bool status =
-		ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
-	
-	if (!status) {
-		dprintf( D_ALWAYS, "Unable to log ULOG_EXECUTE event for job %d.%d\n",
-				job_id.cluster, job_id.proc );
-		return false;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool status = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
+		if (!status) {
+			dprintf( D_ALWAYS, "Unable to log ULOG_EXECUTE event for job %d.%d\n",
+					job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
-Scheduler::WriteEvictToUserLog( PROC_ID job_id, bool checkpointed ) 
+Scheduler::WriteEvictToUserLog( PROC_ID job_id, bool checkpointed )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
 	JobEvictedEvent event;
 	event.checkpointed = checkpointed;
-	bool status =
-		ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
-	if (!status) {
-		dprintf( D_ALWAYS,
-				 "Unable to log ULOG_JOB_EVICTED event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool status = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
+		if (!status) {
+			dprintf( D_ALWAYS,
+					 "Unable to log ULOG_JOB_EVICTED event for job %d.%d\n",
+					 job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
 bool
-Scheduler::WriteTerminateToUserLog( PROC_ID job_id, int status ) 
+Scheduler::WriteTerminateToUserLog( PROC_ID job_id, int status )
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2885,23 +2952,28 @@ Scheduler::WriteTerminateToUserLog( PROC_ID job_id, int status )
 		event.normal = false;
 		event.signalNumber = WTERMSIG(status);
 	}
-	bool rval = ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
+	bool ret = false;
+	dprintf(D_ALWAYS, "Writing TERMINATE event for %d.%d\n", job_id.cluster,job_id.proc);
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool rval = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-	if (!rval) {
-		dprintf( D_ALWAYS, 
-				 "Unable to log ULOG_JOB_TERMINATED event for job %d.%d\n",
-				 job_id.cluster, job_id.proc );
-		return false;
+		if (!rval) {
+			dprintf( D_ALWAYS,
+					 "Unable to log ULOG_JOB_TERMINATED event for job %d.%d\n",
+					 job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 bool
 Scheduler::WriteRequeueToUserLog( PROC_ID job_id, int status, const char * reason ) 
 {
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
 			// User didn't want log
 		return true;
 	}
@@ -2927,15 +2999,19 @@ Scheduler::WriteRequeueToUserLog( PROC_ID job_id, int status, const char * reaso
 	if(reason) {
 		event.setReason(reason);
 	}
-	bool rval = ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-	delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool rval = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-	if (!rval) {
-		dprintf( D_ALWAYS, "Unable to log ULOG_JOB_EVICTED (requeue) event "
-				 "for job %d.%d\n", job_id.cluster, job_id.proc );
-		return false;
+		if (!rval) {
+			dprintf( D_ALWAYS, "Unable to log ULOG_JOB_EVICTED (requeue) event "
+					 "for job %d.%d\n", job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 	}
-	return true;
+	return ret;
 }
 
 
@@ -2946,9 +3022,9 @@ Scheduler::WriteAttrChangeToUserLog( const char* job_id_str, const char* attr,
 {
 	PROC_ID job_id;
 	StrToProcId(job_id_str, job_id);
-	WriteUserLog* ULog = this->InitializeUserLog( job_id );
-	if( ! ULog ) {
-			// User didn't want log
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( job_id );
+	if( ULog.empty() ) {
+		// User didn't want log
 		return true;
 	}
 
@@ -2957,16 +3033,20 @@ Scheduler::WriteAttrChangeToUserLog( const char* job_id_str, const char* attr,
 	event.setName(attr);
 	event.setValue(attr_value);
 	event.setOldValue(old_value);
-        bool rval = ULog->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
-        delete ULog;
+	bool ret = false;
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
+		bool rval = (*p)->writeEvent(&event,GetJobAd(job_id.cluster,job_id.proc));
+		delete *p;
 
-        if (!rval) {
-                dprintf( D_ALWAYS, "Unable to log ULOG_ATTRIBUTE_UPDATE event "
-                                 "for job %d.%d\n", job_id.cluster, job_id.proc );
-                return false;
-        }
+		if (!rval) {
+			dprintf( D_ALWAYS, "Unable to log ULOG_ATTRIBUTE_UPDATE event "
+					"for job %d.%d\n", job_id.cluster, job_id.proc );
+		} else {
+			ret = true;
+		}
 
-	return true;
+	}
+	return ret;
 }
 
 
@@ -3061,7 +3141,7 @@ Scheduler::transferJobFilesReaper(int tid,int exit_status)
 		return FALSE;
 	}
 
-	if (exit_status == FALSE) {
+	if (WIFSIGNALED(exit_status) || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == FALSE)) {
 		dprintf(D_ALWAYS,"ERROR - Staging of job files failed!\n");
 		spoolJobFileWorkers->remove(tid);
 		delete jobs;
@@ -3100,7 +3180,7 @@ Scheduler::spoolJobFilesReaper(int tid,int exit_status)
 		return FALSE;
 	}
 
-	if (exit_status == FALSE) {
+	if (WIFSIGNALED(exit_status) || (WIFEXITED(exit_status) && WEXITSTATUS(exit_status) == FALSE)) {
 		dprintf(D_ALWAYS,"ERROR - Staging of job files failed!\n");
 		spoolJobFileWorkers->remove(tid);
 		delete jobs;
@@ -5740,8 +5820,8 @@ Scheduler::makeReconnectRecords( PROC_ID* job, const ClassAd* match_ad )
 		startd_principal = NULL;
 	}
 
-	WriteUserLog* ULog = this->InitializeUserLog( *job );
-	if ( ULog ) {
+	std::vector<WriteUserLog*> ULog = this->InitializeUserLog( *job );
+	for(std::vector<WriteUserLog*>::iterator p = ULog.begin(); p != ULog.end(); ++p) {
 		JobDisconnectedEvent event;
 		const char* txt = "Local schedd and job shadow died, "
 			"schedd now running again";
@@ -5749,11 +5829,10 @@ Scheduler::makeReconnectRecords( PROC_ID* job, const ClassAd* match_ad )
 		event.setStartdAddr( startd_addr );
 		event.setStartdName( startd_name );
 
-		if( !ULog->writeEventNoFsync(&event,GetJobAd(cluster,proc)) ) {
+		if( !(*p)->writeEventNoFsync(&event,GetJobAd(cluster,proc)) ) {
 			dprintf( D_ALWAYS, "Unable to log ULOG_JOB_DISCONNECTED event\n" );
 		}
-		delete ULog;
-		ULog = NULL;
+		delete *p;
 	}
 
 	dprintf( D_FULLDEBUG, "Adding match record for disconnected job %d.%d "
@@ -6718,8 +6797,8 @@ Scheduler::spawnShadow( shadow_rec* srec )
 			argbuf.sprintf("--schedd=%s", daemonCore->publicNetworkIpAddr());
 			args.AppendArg(argbuf.Value());
 
-			if( m_xfer_queue_contact.Length() ) {
-				argbuf.sprintf("--xfer-queue=%s",m_xfer_queue_contact.Value());
+			if( m_have_xfer_queue_contact ) {
+				argbuf.sprintf("--xfer-queue=%s", m_xfer_queue_contact.c_str());
 				args.AppendArg(argbuf.Value());
 			}
 
@@ -9145,12 +9224,10 @@ Scheduler::child_exit(int pid, int status)
 				//
 			if ( this->LocalUniverseJobsRunning > 0 ) {
 				this->LocalUniverseJobsRunning--;
-				this->jobExitCode(job_id,status);
 			}
 			else
 			{
-				EXCEPT("Internal consistency error: No local universe jobs were"
-					" expected to be running, but one just exited!");
+				dprintf(D_ALWAYS, "Warning: unexpected count for  local universe jobs: %d\n", LocalUniverseJobsRunning);
 			}
 		} else {
 				// A real shadow
@@ -9969,7 +10046,11 @@ cleanup_ckpt_files(int cluster, int proc, const char *owner)
 		RemoveLocalOrRemoteFile(owner,Name,ckpt_name);
 	}
 
-	SpooledJobFiles::removeJobSpoolDirectory(cluster,proc);
+	ClassAd * ad = GetJobAd(cluster, proc);
+	if(ad) {
+		SpooledJobFiles::removeJobSpoolDirectory(ad);
+		FreeJobAd(ad);
+	}
 }
 
 
@@ -10398,6 +10479,7 @@ Scheduler::Init()
 		names.truncate(0);
 
 		OtherPoolStats.RemoveDisabled();
+		OtherPoolStats.Reconfig();
 	}
 
 	/* default 5 megabytes */
@@ -10649,7 +10731,7 @@ Scheduler::Init()
 	}
 
 	m_xfer_queue_mgr.InitAndReconfig();
-	m_xfer_queue_mgr.GetContactInfo(MyShadowSockName,m_xfer_queue_contact);
+	m_have_xfer_queue_contact = m_xfer_queue_mgr.GetContactInfo(MyShadowSockName, m_xfer_queue_contact);
 
 		/* Code to handle GRIDMANAGER_SELECTION_EXPR.  If set, we need to (a) restart
 		 * running gridmanagers if the setting changed value, and (b) parse the
@@ -11931,7 +12013,9 @@ Scheduler::publish( ClassAd *cad ) {
 	
 	unsigned long disk_space = sysapi_disk_space( this->LocalUnivExecuteDir );
 	cad->Assign( ATTR_DISK, (int)disk_space );
-	
+
+	cad->Assign( ATTR_CPUS, 1 );
+
 		// -------------------------------------------------------
 		// Local Universe Attributes
 		// -------------------------------------------------------

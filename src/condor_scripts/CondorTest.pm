@@ -30,6 +30,7 @@ use Cwd;
 use Time::Local;
 use File::Basename;
 use IO::Handle;
+use FileHandle;
 
 use Condor;
 use CondorUtils;
@@ -1730,13 +1731,31 @@ sub findOutput
 
 # Call down to Condor Perl Module for now
 
-sub debug
-{
+sub debug {
     my $string = shift;
-	my $level = shift;
-	my $newstring = "CT:$string";
-	Condor::debug($newstring,$level);
+    my $level = shift;
+    Condor::debug("<CondorTest> $string", $level);
 }
+
+
+sub slurp {
+    my ($file) = @_;
+
+    if (not -e $file) {
+        print "Warning: trying to slurp non-existent file '$file'";
+        return undef;
+    }
+
+    my $fh = new FileHandle $file;
+    if (not defined $fh) {
+        print "Warning: could not open file '$file' to slurp: $!";
+        return undef;
+    }
+
+    my @contents = <$fh>;
+    return wantarray ? @contents : join('', @contents);
+}
+
 
 # PersonalCondorInstance is used to keep track of each personal
 # condor that is launched.
@@ -2255,7 +2274,8 @@ sub AddRunningTest {
     my $test = shift;
     my $runningfile = FindControlFile();
     debug( "Adding <$test> to running tests\n",$debuglevel);
-    runcmd("touch $runningfile/$test");
+    open(OUT, '>', '$runningfile/$test');
+    close(OUT);
 }
 
 sub RemoveRunningTest {

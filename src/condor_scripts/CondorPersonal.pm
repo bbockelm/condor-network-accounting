@@ -322,13 +322,11 @@ sub StartCondorWithParams
 
 sub debug {
     my $string = shift;
-    my $markedstring = "CP:" . $string;
     my $level = shift;
-    if(!(defined $level)) {
-        print( "", timestamp(), ": $markedstring" ) if $DEBUG;
-    }
-    elsif($level <= $DEBUGLEVEL) {
-        print( "", timestamp(), ": $markedstring" ) if $DEBUG;
+    if($DEBUG) {
+        if(!(defined $level) or ($level <= $DEBUGLEVEL)) {
+            print( "", timestamp(), ":<CondorPersonal> $string" );
+        }
     }
 }
 
@@ -1072,6 +1070,16 @@ sub TunePersonalCondor
 	    print NEW "# Done appending from 'append_condor_config'\n";
 	}
 
+	# Gittrac Ticket 2889
+	# This is ok when tests are running as a slot user but if/when we start running tests as root we will
+	# need to put these into a directory with permissions 1777.
+	print NEW "# Relocate C_GAHP files to prevent collision from multiple tests (running on multiple slots) writing into /tmp\n";
+	print NEW "# If we are running tests as root we might need to relocate these to a directory with permissions 1777\n";
+	print NEW "C_GAHP_LOG = \$(LOG)/CGAHPLog.\$(USERNAME)\n";
+	print NEW "C_GAHP_LOCK = \$(LOCK)/CGAHPLock.\$(USERNAME)\n";
+	print NEW "C_GAHP_WORKER_THREAD_LOG = \$(LOG)/CGAHPWorkerLog.\$(USERNAME)\n";
+	print NEW "C_GAHP_WORKER_THREAD_LOCK = \$(LOCK)/CGAHPWorkerLock.\$(USERNAME)\n";
+
 	close(NEW);
 
 	PostTunePersonalCondor($personal_config_file);
@@ -1275,8 +1283,9 @@ sub IsPersonalRunning
 #
 #################################################################
 
-sub IsRunningYet
-{
+sub IsRunningYet {
+    print "Testing if Condor is up.\n";
+    print "\tCONDOR_CONFIG=$ENV{CONDOR_CONFIG}\n";
 	my $daemonlist = `condor_config_val daemon_list`;
 	CondorUtils::fullchomp($daemonlist);
 	my $collector = 0;
@@ -1477,16 +1486,27 @@ sub IsRunningYet
                 print "Waiting for collector to see startd - ";
                 $loopcount = 0;
                 while(1) {
-                    $loopcount += 1;
+                    $loopcount++;
                     my $output = `condor_status -startd -format \"%s\\n\" name`;
                     
                     my $res = $?;
                     if ($res != 0) {
-                        print "\ncondor_status returned error code $res\n";
+			# This might mean that the collector isn't running - but we also sometimes have
+			# a condition where the collector isn't ready yet.  So we'll retry a few times.
+                        print "\n", timestamp(), "condor_status returned error code $res\n";
                         print timestamp(), " The collector probably is not running after all, giving up\n";
                         print timestamp(), " Output from condor_status:\n";
                         print $output;
-                        return 0;
+
+			if($loopcount < $runlimit) {
+			    print timestamp(), " Retrying...\n";
+			    sleep 1;
+			    next;
+			}
+			else {
+			    print timestamp(), " Hit the retry limit.  Erroring out.\n";
+			    return 0;
+			}
                     }
                     
                     if($output =~ /$currenthost/) {

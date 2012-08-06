@@ -204,7 +204,7 @@ int LiveJobImpl::getQDate() const
 	if ( !this->get ( ATTR_Q_DATE, attr ) )
 	{
 		// default to 0?
-		return 0;
+		return time(NULL);
 	}
 
 	return strtol ( attr->getValue(), ( char ** ) NULL, 10 );
@@ -460,7 +460,7 @@ void
     }
     if ( fseek ( hFile , m_he.start , SEEK_SET ) )
     {
-		sprintf(_text,"bad seek in '%s' at index %d", m_he.file.c_str(),m_he.start);
+		sprintf(_text,"bad seek in '%s' at index %ld", m_he.file.c_str(),m_he.start);
         dprintf ( D_ALWAYS, "%s\n",_text.c_str());
 		_ad.Assign("JOB_AD_ERROR",_text.c_str());
         return;
@@ -568,7 +568,10 @@ void Job::set ( const char *_name, const char *_value ) {
 	if (m_live_job) {
 		m_live_job->set(_name,_value);
 	}
-	// ignore for history jobs
+    // hack for late qdate
+    if (m_submission) {
+        m_submission->setOldest(this->getQDate());
+    }
 }
 
 void Job::remove ( const char *_name ) {

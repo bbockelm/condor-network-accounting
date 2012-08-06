@@ -69,7 +69,7 @@ void SecMan::key_printf(int debug_levels, KeyInfo *k) {
 
 
 
-const char* SecMan::sec_feat_act_rev[] = {
+const char SecMan::sec_feat_act_rev[][10] = {
 	"UNDEFINED",
 	"INVALID",
 	"FAIL",
@@ -78,7 +78,7 @@ const char* SecMan::sec_feat_act_rev[] = {
 };
 
 
-const char* SecMan::sec_req_rev[] = {
+const char SecMan::sec_req_rev[][10] = {
 	"UNDEFINED",
 	"INVALID",
 	"NEVER",
@@ -2615,7 +2615,7 @@ SecMan::sec_copy_attribute( ClassAd &dest, ClassAd &source, const char* attr ) {
 	ExprTree *e = source.LookupExpr(attr);
 	if (e) {
 		ExprTree *cp = e->Copy();
-		dest.Insert(attr,cp);
+		dest.Insert(attr,cp,false);
 		return true;
 	} else {
 		return false;
@@ -2629,7 +2629,8 @@ SecMan::sec_copy_attribute( ClassAd &dest, const char *to_attr, ClassAd &source,
 		return false;
 	}
 
-	bool retval = dest.Insert(to_attr, e->Copy()) != 0;
+	e = e->Copy();
+	bool retval = dest.Insert(to_attr, e, false) != 0;
 	return retval;
 }
 
