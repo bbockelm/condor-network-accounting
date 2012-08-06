@@ -1066,13 +1066,6 @@ RemoteResource::updateFromStarter( ClassAd* update_ad )
 		if (strncmp("Network", attr_name, prefix_len) == 0) {
 			dprintf( D_FULLDEBUG, "Adding attribute to jobAd: %s\n", attr_name );
 			jobAd->CopyAttribute(attr_name, update_ad);
-
-	if( update_ad->LookupInteger(ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, int_value) ) {
-		jobAd->Assign(ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, int_value);
-	} else {
-		int_value = this->filetrans.GetDownloadTimestamps();
-		if (int_value) {
-			jobAd->Assign(ATTR_JOB_CURRENT_START_TRANSFER_OUTPUT_DATE, int_value);
 		}
 	}
 
