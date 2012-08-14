@@ -50,6 +50,10 @@ optional configuration settings:
 \end{itemize}
 \Ticket{3030}
 
+\item \Condor{job\_router} can now optionally transform jobs in place
+rather than creating a second transformed version of the job.
+\Ticket{3185}
+
 \item \Condor{defrag} now has a policy option to cancel draining
 of a machine that is in draining mode.  This can be used to effect
 partial draining of machines.
@@ -140,6 +144,18 @@ leaked a small amount of memory every time they were evaluated.  This bug was
 introduced when these functions were added in 7.7.6.
 \Ticket{3082}
 
+\item Several bug fixes for grid-type batch jobs:
+  \begin{itemize}
+  \item Monitoring the status of jobs submitted to PBS and SGE has been
+    improved. \Ticket{3067} \Ticket{3157} \Ticket{3181}
+  \item Job command-line arguments containing characters `(', `)', and `\&'
+    are now handled properly. \Ticket{3057}
+  \item Removing PBS jobs that have just completed no longer causes the jobs
+    to become held. \Ticket{3016}
+  \item Added work-around for \Condor{history} bug when submitting jobs to
+    a Condor pool running Condor 7.7.6 through 7.8.1. \Ticket{3133}
+  \end{itemize}
+
 \end{itemize}
 
 \noindent Known Bugs:
@@ -184,12 +200,11 @@ See section~\ref{sec:Configuring-SMP} for details.
 \Ticket{2905}
 
 \item Condor now supports and implements the caching of ClassAds 
-to reduce memory footprints. Caching may be disabled by setting
+to reduce memory footprints. 
+This feature is experimental and is currently disabled by default.
+It can be enabled by setting
 the new configuration variable \Macro{ENABLE\_CLASSAD\_CACHING}
-to \Expr{False}.
-Third party use of the ClassAd library does not enable the
-caching of ClassAds by default; 
-Condor does enable the caching of ClassAds by default.
+to \Expr{True}.
 \Ticket{2541}
 \Ticket{3127}
 
@@ -294,7 +309,7 @@ identify and specify the use of customized local machine resources.
 
 \item The new configuration variable \MacroNI{ENABLE\_CLASSAD\_CACHING}
 controls whether the new caching feature of ClassAds is used.
-The default value is \Expr{True}.
+The default value is \Expr{False}.
 \Ticket{3127}
 
 \item The new configuration variable \Macro{CLASSAD\_LOG\_STRICT\_PARSING}
